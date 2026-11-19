@@ -628,7 +628,10 @@
       <input type="url" id="sheetsCsvUrl" placeholder="https://docs.google.com/spreadsheets/d/e/.../pub?output=csv" />
     </div>
     <div style="display:flex; justify-content:space-between; flex-wrap:wrap; gap:8px;">
-      <button class="btn btn-outline" onclick="closeSheetsModal()">Закрити</button>
+      <div style="display:flex; gap:8px;">
+        <button class="btn btn-outline" onclick="closeSheetsModal()">Закрити</button>
+        <button class="btn btn-outline" onclick="copyAppsScriptCode()">📋 Копіювати код Apps Script</button>
+      </div>
       <div style="display:flex; gap:8px;">
         <button class="btn btn-outline" onclick="syncFromGoogleSheets()">📥 Імпортувати з CSV</button>
         <button class="btn btn-primary" onclick="saveSheetsSettings()">💾 Зберегти підключення</button>
@@ -1640,6 +1643,324 @@ async function exportToExcel() {
     console.error(err);
     alert("Помилка при формуванні Excel: " + err.message);
   }
+}
+
+
+const GOOGLE_APPS_SCRIPT_CODE = `function doGet(e) {
+  return ContentService.createTextOutput(JSON.stringify({ status: "ready", message: "Табель Apps Script активний" }))
+    .setMimeType(ContentService.MimeType.JSON);
+}
+
+function doPost(e) {
+  try {
+    if (!e || !e.postData || !e.postData.contents) {
+      return ContentService.createTextOutput(JSON.stringify({ status: "error", message: "Порожній POST-запит" }))
+        .setMimeType(ContentService.MimeType.JSON);
+    }
+
+    var data = JSON.parse(e.postData.contents);
+    var ss = SpreadsheetApp.getActiveSpreadsheet();
+
+    var MONTHS_UA = [
+      "січень", "лютий", "березень", "квітень", "травень", "червень",
+      "липень", "серпень", "вересень", "жовтень", "листопад", "грудень"
+    ];
+
+    var year = Number(data.year || 2026);
+    var month = Number(data.month !== undefined ? data.month : 10);
+    var halfMode = data.halfMode || "full";
+    var daysInMonth = new Date(year, month + 1, 0).getDate();
+    var maxActiveDay = halfMode === "first_half" ? 15 : daysInMonth;
+
+    var monthCap = MONTHS_UA[month].charAt(0).toUpperCase() + MONTHS_UA[month].slice(1);
+    var sheetName = monthCap + " " + year + (halfMode === "first_half" ? " (1-15)" : "");
+
+    var existingSheet = ss.getSheetByName(sheetName);
+    var sheetIndex = null;
+    if (existingSheet) {
+      sheetIndex = existingSheet.getIndex();
+      // Якщо це єдиний аркуш у книзі, створюємо тимчасовий перед видаленням
+      var tempSheet = null;
+      if (ss.getSheets().length === 1) {
+        tempSheet = ss.insertSheet("_temp_" + Date.now());
+      }
+      ss.deleteSheet(existingSheet);
+      var sh = ss.insertSheet(sheetName, sheetIndex - 1);
+      if (tempSheet) {
+        ss.deleteSheet(tempSheet);
+      }
+    } else {
+      var sh = ss.insertSheet(sheetName);
+    }
+
+    var holidays = Array.isArray(data.holidays) ? data.holidays.map(Number) : [];
+    var employees = Array.isArray(data.employees) ? data.employees : [];
+    var records = data.records || {};
+    var notes = data.notes || {};
+
+    function isWeekendDay(d) {
+      var dow = new Date(year, month, d).getDay();
+      return dow === 0 || dow === 6;
+    }
+
+    function isNonWorking(d) {
+      return isWeekendDay(d) || holidays.indexOf(d) !== -1;
+    }
+
+    var normWorkdays = 0;
+    for (var d = 1; d <= maxActiveDay; d++) {
+      if (!isNonWorking(d)) normWorkdays++;
+    }
+
+    var dayStartCol = 4;
+    var sumStartCol = dayStartCol + daysInMonth;
+    var totalCols = sumStartCol + 9;
+
+    if (sh.getMaxColumns() < totalCols) {
+      sh.insertColumnsAfter(sh.getMaxColumns(), totalCols - sh.getMaxColumns());
+    }
+
+    sh.getRange(1, 1).setValue("Назва підприємства:").setFontWeight("bold").setFontSize(10);
+    sh.getRange(1, 2, 1, 4).merge().setValue("Державна служба України у справах дітей")
+      .setFontWeight("bold").setFontStyle("italic").setFontSize(11);
+
+    sh.getRange(2, 1, 1, 2).merge().setValue("Код ЄДРПОУ").setFontStyle("italic").setFontSize(9);
+    sh.getRange(2, 3).setValue("45221108").setFontWeight("bold").setFontSize(10);
+
+    var titleEndCol = Math.max(20, totalCols - 4);
+    sh.getRange(4, 1, 1, titleEndCol).merge()
+      .setValue("ТАБЕЛЬ ОБЛІКУ ВИКОРИСТАННЯ РОБОЧОГО ЧАСУ")
+      .setFontWeight("bold").setFontSize(12).setHorizontalAlignment("center").setVerticalAlignment("middle");
+
+    var halfSuffix = halfMode === "first_half" ? " (за першу половину місяця)" : "";
+    sh.getRange(6, 1, 1, titleEndCol).merge()
+      .setValue(MONTHS_UA[month] + " " + year + " року" + halfSuffix)
+      .setFontWeight("bold").setFontSize(10).setHorizontalAlignment("center").setVerticalAlignment("middle");
+
+    sh.getRange(8, 1, 1, 12).merge()
+      .setValue("Кількість робочих днів при 5-денному робочому тижні - " + normWorkdays)
+      .setFontWeight("bold").setFontSize(10);
+
+    var periodBoxStart = Math.max(dayStartCol + 20, totalCols - 6);
+    var dateFillCol = periodBoxStart;
+    var zvitStartCol = periodBoxStart + 1;
+    var zvitEndCol = totalCols;
+
+    sh.getRange(7, dateFillCol, 2, 1).merge()
+      .setValue("Дата\\nзаповнення")
+      .setFontWeight("bold").setFontSize(9).setHorizontalAlignment("center").setVerticalAlignment("middle")
+      .setBorder(true, true, true, true, true, true);
+
+    sh.getRange(7, zvitStartCol, 1, zvitEndCol - zvitStartCol + 1).merge()
+      .setValue("Звітний період")
+      .setFontWeight("bold").setFontSize(9).setHorizontalAlignment("center").setVerticalAlignment("middle")
+      .setBorder(true, true, true, true, true, true);
+
+    var midZvit = zvitStartCol + Math.floor((zvitEndCol - zvitStartCol) / 2);
+    sh.getRange(8, zvitStartCol, 1, midZvit - zvitStartCol + 1).merge()
+      .setValue("з").setFontWeight("bold").setFontSize(9).setHorizontalAlignment("center").setVerticalAlignment("middle")
+      .setBorder(true, true, true, true, true, true);
+    sh.getRange(8, midZvit + 1, 1, zvitEndCol - midZvit).merge()
+      .setValue("по").setFontWeight("bold").setFontSize(9).setHorizontalAlignment("center").setVerticalAlignment("middle")
+      .setBorder(true, true, true, true, true, true);
+
+    var pad2 = function(n) { return String(n).padStart(2, "0"); };
+    var dStartStr = "01." + pad2(month + 1) + "." + year;
+    var dEndStr = pad2(maxActiveDay) + "." + pad2(month + 1) + "." + year;
+
+    sh.getRange(9, dateFillCol).setValue("").setHorizontalAlignment("center").setVerticalAlignment("middle")
+      .setBorder(true, true, true, true, true, true);
+    sh.getRange(9, zvitStartCol, 1, midZvit - zvitStartCol + 1).merge()
+      .setValue(dStartStr).setFontSize(9).setHorizontalAlignment("center").setVerticalAlignment("middle")
+      .setBorder(true, true, true, true, true, true);
+    sh.getRange(9, midZvit + 1, 1, zvitEndCol - midZvit).merge()
+      .setValue(dEndStr).setFontSize(9).setHorizontalAlignment("center").setVerticalAlignment("middle")
+      .setBorder(true, true, true, true, true, true);
+
+    sh.getRange(11, 1, 1, totalCols).merge()
+      .setValue("Управління стратегічного розвитку, аналізу робочих процесів та міжнародного співробітництва")
+      .setFontWeight("bold").setFontSize(10).setHorizontalAlignment("center").setVerticalAlignment("middle")
+      .setBackground("#e9eff7").setBorder(true, true, true, true, true, true);
+
+    var rTop = 12, rMid = 13, rBot = 14;
+
+    sh.getRange(rTop, 1, 3, 1).merge().setValue("№\\nп/п");
+    sh.getRange(rTop, 2, 3, 1).merge().setValue("Таб.\\n№");
+    sh.getRange(rTop, 3, 3, 1).merge().setValue("Прізвище, ім'я, по-батькові, посада");
+
+    sh.getRange(rTop, dayStartCol, 1, daysInMonth).merge()
+      .setValue("Відмітки про явки та неявки за числами місяця");
+
+    for (var d = 1; d <= daysInMonth; d++) {
+      var colD = dayStartCol + d - 1;
+      var cRange = sh.getRange(rMid, colD, 2, 1).merge();
+      cRange.setValue(d);
+      cRange.setBackground(isWeekendDay(d) ? "#d9d9d9" : "#f8fafc");
+    }
+
+    sh.getRange(rTop, sumStartCol, 3, 1).merge().setValue("Всього відпрацьовано днів");
+    sh.getRange(rTop, sumStartCol + 1, 1, 8).merge().setValue("Всього неявок з причин за місяць");
+
+    var absenceLabels = [
+      "Учбова відпустка",
+      "Адмін. відпустка",
+      "Декретна відпустка",
+      "Інші відпустки без збереження",
+      "Тимчасова непрацездатність",
+      "Відрядження",
+      "Інші",
+      "Святкові та вихідні дні"
+    ];
+    for (var aIdx = 0; aIdx < absenceLabels.length; aIdx++) {
+      var aCol = sumStartCol + 1 + aIdx;
+      sh.getRange(rMid, aCol).setValue(absenceLabels[aIdx]).setTextRotation(90);
+      sh.getRange(rBot, aCol).setValue("Дні");
+    }
+
+    sh.getRange(rTop, sumStartCol + 9, 3, 1).merge().setValue("Календарні дні");
+
+    sh.getRange(rTop, 1, 3, totalCols)
+      .setFontWeight("bold").setFontSize(8.5)
+      .setHorizontalAlignment("center").setVerticalAlignment("middle")
+      .setWrap(true)
+      .setBorder(true, true, true, true, true, true);
+    sh.getRange(rTop, 1, 2, totalCols).setBackground("#f1f5f9");
+    sh.getRange(rBot, 1, 1, totalCols).setBackground("#f8fafc");
+
+    for (var d = 1; d <= daysInMonth; d++) {
+      if (isWeekendDay(d)) {
+        sh.getRange(rMid, dayStartCol + d - 1, 2, 1).setBackground("#d9d9d9");
+      }
+    }
+
+    sh.setRowHeight(rTop, 22);
+    sh.setRowHeight(rMid, 68);
+    sh.setRowHeight(rBot, 18);
+
+    var curRow = 15;
+    var lastDept = null;
+
+    for (var eIdx = 0; eIdx < employees.length; eIdx++) {
+      var emp = employees[eIdx];
+      var deptClean = String(emp.dept || "").replace(/\\n+/g, " ").trim();
+
+      if (deptClean !== lastDept) {
+        var deptRng = sh.getRange(curRow, 1, 1, totalCols).merge();
+        deptRng.setValue(deptClean)
+          .setFontWeight("bold").setFontSize(9.5)
+          .setHorizontalAlignment("center").setVerticalAlignment("middle")
+          .setBackground("#ffffff")
+          .setBorder(true, true, true, true, true, true);
+        sh.setRowHeight(curRow, 22);
+        lastDept = deptClean;
+        curRow++;
+      }
+
+      var empRec = records[emp.id] || {};
+      var empNotes = notes[emp.id] || {};
+      var worked = 0, study = 0, leave = 0, maternity = 0, unpaidOther = 0, sick = 0, trip = 0, other = 0;
+
+      for (var d = 1; d <= maxActiveDay; d++) {
+        var code = String(empRec[d] || "").trim();
+        if (["Р", "РС", "РВ", "ВЧ", "РН", "НУ"].indexOf(code) !== -1) worked++;
+        else if (["Н", "НБ"].indexOf(code) !== -1) study++;
+        else if (["В", "Д", "ДО", "НА", "ДБ", "Ч", "ТВ"].indexOf(code) !== -1) leave++;
+        else if (["ВП", "ДД"].indexOf(code) !== -1) maternity++;
+        else if (["БЗ"].indexOf(code) !== -1) unpaidOther++;
+        else if (["ТН", "НН"].indexOf(code) !== -1) sick++;
+        else if (["ВД"].indexOf(code) !== -1) trip++;
+        else if (["К", "ІН", "І", "П", "ПР", "С", "НЗ", "ІВ"].indexOf(code) !== -1) other++;
+      }
+
+      var rowVals = [Number(emp.num) || emp.num, Number(emp.tabNo) || emp.tabNo, String(emp.name || "").trim()];
+      for (var d = 1; d <= daysInMonth; d++) {
+        rowVals.push(d <= maxActiveDay && empRec[d] ? empRec[d] : "");
+      }
+      rowVals.push(worked, study || "", leave || "", maternity || "", unpaidOther || "", sick || "", trip || "", other || "", "", maxActiveDay);
+
+      var rRange = sh.getRange(curRow, 1, 1, totalCols);
+      rRange.setValues([rowVals])
+        .setFontSize(9)
+        .setVerticalAlignment("middle")
+        .setWrap(true)
+        .setBorder(true, true, true, true, true, true);
+
+      sh.getRange(curRow, 1, 1, 2).setHorizontalAlignment("center");
+      sh.getRange(curRow, 3).setHorizontalAlignment("left").setFontSize(8.5);
+      sh.getRange(curRow, dayStartCol, 1, daysInMonth + 10).setHorizontalAlignment("center");
+
+      for (var d = 1; d <= daysInMonth; d++) {
+        var cCell = sh.getRange(curRow, dayStartCol + d - 1);
+        cCell.setBackground(isWeekendDay(d) ? "#d9d9d9" : "#ffffff");
+        if (empNotes[d]) cCell.setNote(empNotes[d]);
+      }
+
+      sh.setRowHeight(curRow, 28);
+      curRow++;
+    }
+
+    curRow += 1;
+    var signerHead = data.signerHead || "Лисюк А.М.";
+    var signerHr = data.signerHr || "Якуніна Т.В.";
+
+    sh.getRange(curRow, 1, 1, 2).merge().setValue("Відповідальна особа").setFontSize(9);
+    sh.getRange(curRow, 3, 1, 6).merge().setBorder(false, false, true, false, false, false);
+    sh.getRange(curRow, dayStartCol + 12, 1, 8).merge().setValue(signerHead).setHorizontalAlignment("center").setFontSize(9)
+      .setBorder(false, false, true, false, false, false);
+    curRow++;
+
+    sh.getRange(curRow, 1, 1, 2).merge().setValue("Керівник структурного підрозділу").setFontSize(9);
+    sh.getRange(curRow, 3, 1, 6).merge().setBorder(false, false, true, false, false, false);
+    sh.getRange(curRow, dayStartCol + 12, 1, 8).merge().setValue(signerHead).setHorizontalAlignment("center").setFontSize(9)
+      .setBorder(false, false, true, false, false, false);
+    curRow++;
+
+    sh.getRange(curRow, 1, 1, 2).merge().setValue("Перевірили:").setFontSize(9);
+    curRow++;
+
+    sh.getRange(curRow, 1, 1, 2).merge().setValue("Працівник кадрової служби").setFontSize(9);
+    sh.getRange(curRow, 3, 1, 6).merge().setBorder(false, false, true, false, false, false);
+    sh.getRange(curRow, dayStartCol + 12, 1, 8).merge().setValue(signerHr).setHorizontalAlignment("center").setFontSize(9)
+      .setBorder(false, false, true, false, false, false);
+    curRow++;
+
+    sh.getRange(curRow, 1, 1, 2).merge().setValue("Працівник відділу бухгалтерського обліку та звітності").setFontSize(9);
+    sh.getRange(curRow, 3, 1, 6).merge().setBorder(false, false, true, false, false, false);
+    sh.getRange(curRow, dayStartCol + 12, 1, 8).merge().setBorder(false, false, true, false, false, false);
+
+    sh.setColumnWidth(1, 38);
+    sh.setColumnWidth(2, 48);
+    sh.setColumnWidth(3, 220);
+    for (var d = 1; d <= daysInMonth; d++) {
+      sh.setColumnWidth(dayStartCol + d - 1, 28);
+    }
+    for (var s = 0; s < 10; s++) {
+      sh.setColumnWidth(sumStartCol + s, 32);
+    }
+
+    sh.setHiddenGridlines(false);
+    ss.setActiveSheet(sh);
+
+    return ContentService.createTextOutput(JSON.stringify({ status: "ok", sheet: sheetName }))
+      .setMimeType(ContentService.MimeType.JSON);
+  } catch (err) {
+    return ContentService.createTextOutput(JSON.stringify({ status: "error", message: err.message }))
+      .setMimeType(ContentService.MimeType.JSON);
+  }
+}`;
+
+function copyAppsScriptCode() {
+  navigator.clipboard.writeText(GOOGLE_APPS_SCRIPT_CODE).then(() => {
+    showToast("Код Google Apps Script скопійовано у буфер обміну!");
+  }).catch(() => {
+    const ta = document.createElement("textarea");
+    ta.value = GOOGLE_APPS_SCRIPT_CODE;
+    document.body.appendChild(ta);
+    ta.select();
+    document.execCommand("copy");
+    document.body.removeChild(ta);
+    showToast("Код Google Apps Script скопійовано!");
+  });
 }
 
 // Старт
