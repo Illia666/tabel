@@ -414,7 +414,8 @@
     </div>
   </div>
   <div class="header-actions">
-    <button class="btn btn-glass" onclick="openSheetsModal()" title="Імпорт даних із Google Таблиці">📊 Google Таблиця</button>
+    <button class="btn btn-primary" onclick="pushToGoogleSheets()" title="Створити/оновити аркуш поточного місяця у Google Таблиці">🔄 Синхронізувати таблицю</button>
+    <button class="btn btn-glass" onclick="openSheetsModal()" title="Налаштування підключення до Google Таблиці">📊 Google Таблиця</button>
     <button class="btn btn-glass" onclick="openEmpModal()">👥 Працівники</button>
     <button class="btn btn-glass" onclick="exportBackupJson()" title="Зберегти всі табелі у JSON-файл">💾 Бекап</button>
     <button class="btn btn-glass" onclick="document.getElementById('importJsonInput').click()" title="Відновити з JSON-файлу">📂 Відновити</button>
@@ -610,17 +611,28 @@
 <!-- Модальне вікно синхронізації з Google Таблицею -->
 <div class="modal-backdrop" id="sheetsModal">
   <div class="modal">
-    <h3>📊 Імпорт відпусток / відряджень з Google Таблиці</h3>
+    <h3>📊 Підключення до Google Таблиці</h3>
     <p style="font-size:12.5px; color:var(--muted); margin-top:-6px;">
-      Опублікуйте аркуш обліку наказів у Google Таблицях у форматі <strong>CSV</strong> (<em>Файл → Поділитися → Опублікувати в інтернеті → CSV</em>) та вставте посилання нижче. Таблиця повинна містити колонки: <code>Таб.№</code> (або <code>ПІБ</code>), <code>Код</code> (В, ВД, ТН, К...), <code>Дата початку</code> (ДД.ММ.РРРР), <code>Дата кінця</code> (ДД.ММ.РРРР), <code>Примітка</code>.
+      Вставте посилання на <strong>Веб-додаток Google Apps Script</strong> (<code>https://script.google.com/macros/s/.../exec</code>), щоб кнопка <strong>«🔄 Синхронізувати таблицю»</strong> створювала окремий аркуш для кожного місяця у точному форматі Форми № П-5.
     </p>
     <div class="field" style="margin-bottom:14px;">
-      <label>Посилання на опублікований CSV з Google Таблиці</label>
+      <label>URL веб-додатку Google Apps Script (для експорту табеля)</label>
+      <input type="url" id="sheetsWebAppUrl" placeholder="https://script.google.com/macros/s/.../exec" />
+    </div>
+    <hr style="border:none; border-top:1px solid var(--border); margin:16px 0;" />
+    <p style="font-size:12px; color:var(--muted);">
+      <em>Додатково (необов'язково):</em> опублікуйте аркуш обліку наказів у Google Таблицях у форматі <strong>CSV</strong> (<em>Файл → Поділитися → Опублікувати в інтернеті → CSV</em>) для імпорту відсутностей.
+    </p>
+    <div class="field" style="margin-bottom:14px;">
+      <label>Посилання на опублікований CSV з Google Таблиці (для імпорту)</label>
       <input type="url" id="sheetsCsvUrl" placeholder="https://docs.google.com/spreadsheets/d/e/.../pub?output=csv" />
     </div>
-    <div style="display:flex; justify-content:space-between; gap:8px;">
+    <div style="display:flex; justify-content:space-between; flex-wrap:wrap; gap:8px;">
       <button class="btn btn-outline" onclick="closeSheetsModal()">Закрити</button>
-      <button class="btn btn-primary" onclick="syncFromGoogleSheets()">🔄 Завантажити та застосувати до поточного місяця</button>
+      <div style="display:flex; gap:8px;">
+        <button class="btn btn-outline" onclick="syncFromGoogleSheets()">📥 Імпортувати з CSV</button>
+        <button class="btn btn-primary" onclick="saveSheetsSettings()">💾 Зберегти підключення</button>
+      </div>
     </div>
   </div>
 </div>
@@ -710,6 +722,7 @@ let state = {
   fillDate: "2026-11-30",
   signerHead: "Лисюк А.М.",
   signerHr: "Якуніна Т.В.",
+  sheetsWebAppUrl: "",
   sheetsCsvUrl: "",
   employees: JSON.parse(JSON.stringify(DEFAULT_EMPLOYEES)),
   records: {},  // "YYYY-MM": { empId: { day: code } }
@@ -744,6 +757,7 @@ function loadState() {
   document.getElementById("fillDateInput").value = state.fillDate;
   document.getElementById("signerHead").value = state.signerHead;
   document.getElementById("signerHr").value = state.signerHr;
+  document.getElementById("sheetsWebAppUrl").value = state.sheetsWebAppUrl || "";
   document.getElementById("sheetsCsvUrl").value = state.sheetsCsvUrl || "";
 
   ensureMonthInitialized(state.year, state.month, true);
@@ -1192,13 +1206,63 @@ function importBackupJson(event) {
   event.target.value = "";
 }
 
-// Синхронізація з Google Таблицею (CSV)
+// Синхронізація з Google Таблицею
 function openSheetsModal() {
+  document.getElementById("sheetsWebAppUrl").value = state.sheetsWebAppUrl || "";
+  document.getElementById("sheetsCsvUrl").value = state.sheetsCsvUrl || "";
   document.getElementById("sheetsModal").classList.add("open");
 }
 
 function closeSheetsModal() {
   document.getElementById("sheetsModal").classList.remove("open");
+}
+
+function saveSheetsSettings() {
+  state.sheetsWebAppUrl = document.getElementById("sheetsWebAppUrl").value.trim();
+  state.sheetsCsvUrl = document.getElementById("sheetsCsvUrl").value.trim();
+  saveState();
+  closeSheetsModal();
+  showToast("Налаштування Google Таблиці збережено!");
+}
+
+async function pushToGoogleSheets() {
+  const webAppUrl = (state.sheetsWebAppUrl || document.getElementById("sheetsWebAppUrl").value || "").trim();
+  if (!webAppUrl) {
+    openSheetsModal();
+    showToast("Спочатку вкажіть URL веб-додатку Google Apps Script");
+    return;
+  }
+
+  const key = getPeriodKey(state.year, state.month);
+  const payload = {
+    year: state.year,
+    month: state.month,
+    halfMode: state.halfMode,
+    fillDate: state.fillDate,
+    signerHead: state.signerHead,
+    signerHr: state.signerHr,
+    employees: state.employees,
+    records: state.records[key] || {},
+    notes: state.notes[key] || {},
+    holidays: state.holidays[key] || []
+  };
+
+  showToast("⏳ Синхронізація з Google Таблицею...");
+
+  try {
+    await fetch(webAppUrl, {
+      method: "POST",
+      mode: "no-cors",
+      headers: { "Content-Type": "text/plain;charset=utf-8" },
+      body: JSON.stringify(payload)
+    });
+
+    const monthNameCap = MONTHS_UA[state.month].charAt(0).toUpperCase() + MONTHS_UA[state.month].slice(1);
+    showToast(`✅ Синхронізовано! Аркуш «${monthNameCap} ${state.year}» створено/оновлено у Google Таблиці`);
+  } catch (err) {
+    console.error(err);
+    alert("Помилка синхронізації з Google Таблицею: " + err.message);
+  }
 }
 
 function parseDateFlexible(str) {
@@ -1278,7 +1342,7 @@ async function syncFromGoogleSheets() {
 }
 
 // Допоміжна функція для динамічного формування рядків працівників у Excel-шаблоні
-function rebuildWorksheetRows(ws, employees) {
+function rebuildWorksheetRows(ws, employees, daysCount = 30) {
   // Зберігаємо стиль рядка підрозділу (рядок 19) та стиль рядка працівника (рядок 20..21)
   const deptTemplateCell = ws.getCell("A19");
   const deptStyle = JSON.parse(JSON.stringify(deptTemplateCell.style || {}));
@@ -1338,7 +1402,7 @@ function rebuildWorksheetRows(ws, employees) {
     ["T", "U"], ["V", "V"], ["W", "W"], ["X", "Y"], ["Z", "AA"],
     ["AB", "AC"], ["AD", "AE"], ["AF", "AF"], ["AG", "AG"], ["AH", "AH"],
     ["AI", "AI"], ["AJ", "AJ"], ["AK", "AK"], ["AL", "AL"], ["AM", "AN"],
-    ["AO", "AO"], ["AP", "AQ"], ["AR", "AR"], ["AS", "AT"], ["AU", "AU"],
+    ["AO", "AO"], ["AP", "AQ"], ["AR", "AR"], ...(daysCount === 31 ? [["AS", "AS"], ["AT", "AT"]] : [["AS", "AT"]]), ["AU", "AU"],
     ["AV", "AV"], ["AW", "AW"], ["AX", "AX"], ["AY", "AY"], ["AZ", "AZ"],
     ["BA", "BA"], ["BB", "BB"], ["BC", "BD"], ["BE", "BF"], ["BG", "BG"],
     ["BH", "BH"], ["BI", "BL"], ["BM", "BN"], ["BO", "BO"], ["BP", "BR"]
@@ -1437,10 +1501,43 @@ async function exportToExcel() {
     ws.getCell("BF11").value = startDate;
     ws.getCell("BH11").value = endDate;
 
-    // Динамічно перебудовуємо рядки таблиці під актуальний список працівників
-    const { empRowMap, empRowBlocks, footerStartRow } = rebuildWorksheetRows(ws, state.employees);
+    // Використовуємо точні рядки шаблону для стандартного складу працівників, щоб зберегти усі стилі, заливки вихідних і об'єднання
+    const defaultRowMap = {
+      "emp_209": 20,
+      "emp_256": 23,
+      "emp_258": 26,
+      "emp_259": 29,
+      "emp_205": 33,
+      "emp_182": 35,
+      "emp_229": 38,
+      "emp_260": 40
+    };
+    const isDefaultEmpList =
+      state.employees.length === DEFAULT_EMPLOYEES.length &&
+      state.employees.every((e, i) =>
+        e.id === DEFAULT_EMPLOYEES[i].id &&
+        String(e.num) === String(DEFAULT_EMPLOYEES[i].num) &&
+        Number(e.tabNo) === Number(DEFAULT_EMPLOYEES[i].tabNo) &&
+        e.name === DEFAULT_EMPLOYEES[i].name &&
+        e.dept === DEFAULT_EMPLOYEES[i].dept
+      );
 
-    // Підписи у перенесеному футері
+    let empRowMap = {};
+    let empRowBlocks = [];
+    let footerStartRow = 42;
+
+    if (isDefaultEmpList) {
+      empRowMap = { ...defaultRowMap };
+      empRowBlocks = Object.values(defaultRowMap).map(r => [r, r + 1]);
+      footerStartRow = 42;
+    } else {
+      const rebuilt = rebuildWorksheetRows(ws, state.employees, days);
+      empRowMap = rebuilt.empRowMap;
+      empRowBlocks = rebuilt.empRowBlocks;
+      footerStartRow = rebuilt.footerStartRow;
+    }
+
+    // Підписи у футері
     ws.getCell(`AT${footerStartRow}`).value = state.signerHead;
     ws.getCell(`AT${footerStartRow + 1}`).value = state.signerHead;
     ws.getCell(`AT${footerStartRow + 3}`).value = state.signerHr;
@@ -1457,8 +1554,6 @@ async function exportToExcel() {
       empRowBlocks.forEach(([r1, r2]) => {
         try { ws.unMergeCells(`AS${r1}:AT${r2}`); } catch (e) {}
       });
-      ws.getColumn("AS").width = 2.2;
-      ws.getColumn("AT").width = 2.2;
       dayCols = [
         "K", "M", "O", "Q", "S", "T", "V", "W", "X", "Z",
         "AB", "AD", "AF", "AG", "AH", "AI", "AJ", "AK", "AL", "AM",
@@ -1466,10 +1561,22 @@ async function exportToExcel() {
       ];
     }
 
+    // Вирівнюємо ширину стовпців днів (зокрема одиничних та правої частини об'єднаних), щоб числа і коди (ВД) не давали '#' і не переносилися
+    const singleOrLeftDayCols = [
+      "K", "M", "O", "Q", "S", "T", "V", "W", "X", "Z",
+      "AB", "AD", "AF", "AG", "AH", "AI", "AJ", "AK", "AL", "AM",
+      "AO", "AP", "AR", "AS", "AT", "AU", "AV", "AW", "AX", "AY", "AZ"
+    ];
+    singleOrLeftDayCols.forEach(col => {
+      const c = ws.getColumn(col);
+      if ((c.width || 0) < 3.8) c.width = 3.8;
+    });
+
     dayCols.forEach((col, idx) => {
       const dayNum = idx + 1;
       const cell = ws.getCell(`${col}17`);
       cell.value = dayNum <= days ? dayNum : "";
+      cell.alignment = { ...(cell.alignment || {}), horizontal: "center", vertical: "middle", wrapText: false };
     });
 
     state.employees.forEach(emp => {
@@ -1484,6 +1591,7 @@ async function exportToExcel() {
       dayCols.forEach((col, idx) => {
         const dayNum = idx + 1;
         const cell = ws.getCell(`${col}${r}`);
+        cell.alignment = { ...(cell.alignment || {}), horizontal: "center", vertical: "middle", wrapText: false };
         if (dayNum <= maxActiveDay) {
           cell.value = rec[dayNum] || null;
           if (empNotes[dayNum]) {
