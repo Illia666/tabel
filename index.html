@@ -415,11 +415,9 @@
   </div>
   <div class="header-actions">
     <button class="btn btn-primary" onclick="pushToGoogleSheets()" title="Створити/оновити аркуш поточного місяця у Google Таблиці">🔄 Синхронізувати таблицю</button>
+    <button class="btn btn-glass" onclick="openSheetLink()" title="Відкрити Google Таблицю з табелями у новій вкладці">🔗 Відкрити таблицю</button>
     <button class="btn btn-glass" onclick="openSheetsModal()" title="Налаштування підключення до Google Таблиці">📊 Google Таблиця</button>
     <button class="btn btn-glass" onclick="openEmpModal()">👥 Працівники</button>
-    <button class="btn btn-glass" onclick="exportBackupJson()" title="Зберегти всі табелі у JSON-файл">💾 Бекап</button>
-    <button class="btn btn-glass" onclick="document.getElementById('importJsonInput').click()" title="Відновити з JSON-файлу">📂 Відновити</button>
-    <input type="file" id="importJsonInput" accept=".json" style="display:none" onchange="importBackupJson(event)" />
     <button class="btn btn-success" onclick="exportToExcel()">📥 Завантажити табель (.xlsx)</button>
   </div>
 </header>
@@ -427,11 +425,11 @@
 <div class="container">
   <!-- Період та керування -->
   <div class="toolbar">
+    <div class="field" style="flex:0 0 100%;">
+      <label>Підрозділ (кожен має свій табель, підпис та аркуш у Google Таблиці)</label>
+      <select id="deptSelect" onchange="changeDept()" style="width:100%; max-width:720px; font-weight:600; border-color:var(--primary);"></select>
+    </div>
     <div class="controls-group">
-      <div class="field">
-        <label>Підрозділ (кожен має свій табель, підпис та аркуш у Google Таблиці)</label>
-        <select id="deptSelect" onchange="changeDept()" style="min-width:440px; max-width:560px; font-weight:600; border-color:var(--primary);"></select>
-      </div>
       <div class="field">
         <label>Місяць</label>
         <select id="monthSelect" onchange="changePeriod()">
@@ -470,11 +468,11 @@
       </div>
       <div class="field">
         <label>Керівник підрозділу (підпис)</label>
-        <input type="text" id="signerHead" value="" placeholder="Прізвище І.П." style="width:135px;" onchange="saveState()" />
+        <input type="text" id="signerHead" value="" placeholder="Прізвище І.П." autocomplete="off" style="width:135px;" onchange="saveState()" />
       </div>
       <div class="field">
         <label>Кадрова служба</label>
-        <input type="text" id="signerHr" value="Якуніна Т.В." style="width:135px;" onchange="saveState()" />
+        <input type="text" id="signerHr" value="Якуніна Т.В." autocomplete="off" style="width:135px;" onchange="saveState()" />
       </div>
     </div>
 
@@ -619,6 +617,10 @@
     <p style="font-size:12.5px; color:var(--muted); margin-top:-6px;">
       Вставте посилання на <strong>Веб-додаток Google Apps Script</strong> (<code>https://script.google.com/macros/s/.../exec</code>), щоб кнопка <strong>«🔄 Синхронізувати таблицю»</strong> створювала <strong>окремий аркуш для кожного підрозділу</strong>, а табелі місяців додавалися в нього блоками один під одним (повторна синхронізація того ж місяця оновлює свій блок). Одне посилання підходить для всіх підрозділів.
     </p>
+    <div class="field" style="margin-bottom:14px;">
+      <label>Посилання на Google Таблицю (для кнопки «🔗 Відкрити таблицю»)</label>
+      <input type="url" id="sheetsViewUrl" placeholder="https://docs.google.com/spreadsheets/d/.../edit" />
+    </div>
     <div class="field" style="margin-bottom:14px;">
       <label>URL веб-додатку Google Apps Script (для експорту табеля)</label>
       <input type="url" id="sheetsWebAppUrl" placeholder="https://script.google.com/macros/s/.../exec" />
@@ -1344,7 +1346,18 @@ function importBackupJson(event) {
 }
 
 // Синхронізація з Google Таблицею
+function openSheetLink() {
+  const url = (state.sheetsViewUrl || "").trim();
+  if (!url) {
+    openSheetsModal();
+    showToast("Спочатку вкажіть посилання на Google Таблицю");
+    return;
+  }
+  window.open(url, "_blank", "noopener");
+}
+
 function openSheetsModal() {
+  document.getElementById("sheetsViewUrl").value = state.sheetsViewUrl || "";
   document.getElementById("sheetsWebAppUrl").value = state.sheetsWebAppUrl || "";
   document.getElementById("sheetsCsvUrl").value = state.sheetsCsvUrl || "";
   document.getElementById("sheetsModal").classList.add("open");
@@ -1355,6 +1368,12 @@ function closeSheetsModal() {
 }
 
 function saveSheetsSettings() {
+  const viewUrl = document.getElementById("sheetsViewUrl").value.trim();
+  if (viewUrl && !/^https?:\/\//i.test(viewUrl)) {
+    showToast("Посилання на таблицю має починатися з https://");
+    return;
+  }
+  state.sheetsViewUrl = viewUrl;
   state.sheetsWebAppUrl = document.getElementById("sheetsWebAppUrl").value.trim();
   state.sheetsCsvUrl = document.getElementById("sheetsCsvUrl").value.trim();
   saveState();
