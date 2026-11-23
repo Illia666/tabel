@@ -1983,12 +1983,12 @@ function doPost(e) {
       .setValue("Кількість робочих днів при 5-денному робочому тижні - " + normWorkdays)
       .setFontWeight("bold").setFontSize(10);
 
-    var periodBoxStart = Math.max(dayStartCol + 20, totalCols - 6);
+    var periodBoxStart = Math.max(dayStartCol + 20, totalCols - 8);
     var dateFillCol = periodBoxStart;
-    var zvitStartCol = periodBoxStart + 1;
+    var zvitStartCol = periodBoxStart + 3;
     var zvitEndCol = totalCols;
 
-    sh.getRange(R0 + 7, dateFillCol, 3, 1).merge()
+    sh.getRange(R0 + 7, dateFillCol, 3, 3).merge()
       .setValue("Дата\\nзаповнення")
       .setFontWeight("bold").setFontSize(9).setHorizontalAlignment("center").setVerticalAlignment("middle")
       .setBorder(true, true, true, true, true, true);
@@ -2152,29 +2152,29 @@ function doPost(e) {
     var footerStart = curRow;
 
     sh.getRange(curRow, 1, 1, 3).merge().setValue("Відповідальна особа").setFontSize(9);
-    sh.getRange(curRow, 4, 1, 9).merge().setBorder(false, false, true, false, false, false);
+    sh.getRange(curRow, 4, 1, 9).merge().setBorder(null, null, true, null, null, null);
     sh.getRange(curRow, dayStartCol + 12, 1, 8).merge().setValue(signerHead).setHorizontalAlignment("center").setFontSize(9)
-      .setBorder(false, false, true, false, false, false);
+      .setBorder(null, null, true, null, null, null);
     curRow++;
 
     sh.getRange(curRow, 1, 1, 3).merge().setValue("Керівник структурного підрозділу").setFontSize(9);
-    sh.getRange(curRow, 4, 1, 9).merge().setBorder(false, false, true, false, false, false);
+    sh.getRange(curRow, 4, 1, 9).merge().setBorder(null, null, true, null, null, null);
     sh.getRange(curRow, dayStartCol + 12, 1, 8).merge().setValue(signerHead).setHorizontalAlignment("center").setFontSize(9)
-      .setBorder(false, false, true, false, false, false);
+      .setBorder(null, null, true, null, null, null);
     curRow++;
 
     sh.getRange(curRow, 1, 1, 3).merge().setValue("Перевірили:").setFontSize(9);
     curRow++;
 
     sh.getRange(curRow, 1, 1, 3).merge().setValue("Працівник кадрової служби").setFontSize(9);
-    sh.getRange(curRow, 4, 1, 9).merge().setBorder(false, false, true, false, false, false);
+    sh.getRange(curRow, 4, 1, 9).merge().setBorder(null, null, true, null, null, null);
     sh.getRange(curRow, dayStartCol + 12, 1, 8).merge().setValue(signerHr).setHorizontalAlignment("center").setFontSize(9)
-      .setBorder(false, false, true, false, false, false);
+      .setBorder(null, null, true, null, null, null);
     curRow++;
 
     sh.getRange(curRow, 1, 1, 3).merge().setValue("Працівник відділу бухгалтерського обліку та звітності").setFontSize(9);
-    sh.getRange(curRow, 4, 1, 9).merge().setBorder(false, false, true, false, false, false);
-    sh.getRange(curRow, dayStartCol + 12, 1, 8).merge().setBorder(false, false, true, false, false, false);
+    sh.getRange(curRow, 4, 1, 9).merge().setBorder(null, null, true, null, null, null);
+    sh.getRange(curRow, dayStartCol + 12, 1, 8).merge().setBorder(null, null, true, null, null, null);
 
     sh.getRange(footerStart, 1, 5, totalCols).setFontSize(11).setVerticalAlignment("bottom");
     sh.getRange(footerStart, 1, 5, 3).setWrap(true);
@@ -2190,6 +2190,8 @@ function doPost(e) {
     for (var s = 0; s < 10; s++) {
       sh.setColumnWidth(sumStartCol + s, 30);
     }
+
+    sh.setHiddenGridlines(true);
 
     return ContentService.createTextOutput(JSON.stringify({ status: "ok", sheet: sheetName, block: tag }))
       .setMimeType(ContentService.MimeType.JSON);
