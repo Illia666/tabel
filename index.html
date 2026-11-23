@@ -746,6 +746,9 @@ const DEPARTMENTS = [
   { id: "d19", name: "Головний спеціаліст з охорони праці та цивільного захисту", short: "Охорона праці та ЦЗ" }
 ];
 const DEFAULT_DEPT_ID = "d08";
+// Спільні налаштування Google Таблиці (підставляються автоматично, вводити їх вручну не потрібно)
+const DEFAULT_SHEET_VIEW_URL = "https://docs.google.com/spreadsheets/d/1sgZBlQZT3Hk4kedsZnHppY9zUYS0a-Cz7yl4U9X6rWo/edit";
+const DEFAULT_WEBAPP_URL = "https://script.google.com/macros/s/AKfycbx8Oht2k84PdjcVS4_HnQMRmgnGy7d9ExdgXY9M068rnD6QRbLV9m7hFrl11kokzRfc/exec";
 const STORAGE_KEY = "dsusd_tabel_state_v3";
 const ACTIVE_FIELDS = ["employees", "records", "notes", "holidays", "signerHead", "signerHr"];
 let LOCKED_DEPT = false;
@@ -864,6 +867,8 @@ function loadState() {
       LOCKED_DEPT = true;
     }
   } catch (e) { /* ignore */ }
+  if (!state.sheetsViewUrl) state.sheetsViewUrl = DEFAULT_SHEET_VIEW_URL;
+  if (!state.sheetsWebAppUrl) state.sheetsWebAppUrl = DEFAULT_WEBAPP_URL;
   if (!DEPARTMENTS.some(d => d.id === state.currentDept)) state.currentDept = DEFAULT_DEPT_ID;
   activateDept(state.currentDept);
   renderDeptOptions();
