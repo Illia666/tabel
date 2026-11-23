@@ -416,7 +416,6 @@
   <div class="header-actions">
     <button class="btn btn-primary" onclick="pushToGoogleSheets()" title="Створити/оновити аркуш поточного місяця у Google Таблиці">🔄 Синхронізувати таблицю</button>
     <button class="btn btn-glass" onclick="openSheetLink()" title="Відкрити Google Таблицю з табелями у новій вкладці">🔗 Відкрити таблицю</button>
-    <button class="btn btn-glass" onclick="openSheetsModal()" title="Налаштування підключення до Google Таблиці">📊 Google Таблиця</button>
     <button class="btn btn-glass" onclick="openEmpModal()">👥 Працівники</button>
     <button class="btn btn-success" onclick="exportToExcel()">📥 Завантажити табель (.xlsx)</button>
   </div>
@@ -1726,6 +1725,13 @@ async function exportToExcel() {
       empRowBlocks.forEach(([r1, r2]) => {
         try { ws.unMergeCells(`AS${r1}:AT${r2}`); } catch (e) {}
       });
+      // кожен з двох стовпців (24 і 25 число) знову об'єднуємо по вертикалі, як і решту днів
+      try { ws.mergeCells("AS17:AS18"); } catch (e) {}
+      try { ws.mergeCells("AT17:AT18"); } catch (e) {}
+      empRowBlocks.forEach(([r1, r2]) => {
+        try { ws.mergeCells(`AS${r1}:AS${r2}`); } catch (e) {}
+        try { ws.mergeCells(`AT${r1}:AT${r2}`); } catch (e) {}
+      });
       dayCols = [
         "K", "M", "O", "Q", "S", "T", "V", "W", "X", "Z",
         "AB", "AD", "AF", "AG", "AH", "AI", "AJ", "AK", "AL", "AM",
@@ -1734,6 +1740,25 @@ async function exportToExcel() {
     }
 
     // Вирівнюємо ширину стовпців днів (зокрема одиничних та правої частини об'єднаних), щоб числа і коди (ВД) не давали '#' і не переносилися
+    // Єдиний стиль клітинок днів (береться зі стовпця «2» шаблону) і заливка вихідних/святкових за реальним календарем
+    const cloneStyle = (st) => JSON.parse(JSON.stringify(st || {}));
+    const greyFill = { type: "pattern", pattern: "solid", fgColor: { theme: 2, tint: -0.1499984740745262 } };
+    const whiteFill = { type: "pattern", pattern: "solid", fgColor: { theme: 0, tint: 0 } };
+    const refHdr = [cloneStyle(ws.getCell("M17").style), cloneStyle(ws.getCell("M18").style)];
+    const refRows = {};
+    state.employees.forEach(emp => {
+      const r0 = empRowMap[emp.id];
+      if (r0) refRows[r0] = [cloneStyle(ws.getCell(`M${r0}`).style), cloneStyle(ws.getCell(`M${r0 + 1}`).style)];
+    });
+    const paintDay = (col, rows, refs, dayNum) => {
+      const grey = dayNum <= days && isNonWorkingDay(y, m, dayNum);
+      rows.forEach((rr, i) => {
+        const c = ws.getCell(`${col}${rr}`);
+        c.style = cloneStyle(refs[i]);
+        c.fill = grey ? greyFill : whiteFill;
+      });
+    };
+
     const singleOrLeftDayCols = [
       "K", "M", "O", "Q", "S", "T", "V", "W", "X", "Z",
       "AB", "AD", "AF", "AG", "AH", "AI", "AJ", "AK", "AL", "AM",
@@ -1746,6 +1771,7 @@ async function exportToExcel() {
 
     dayCols.forEach((col, idx) => {
       const dayNum = idx + 1;
+      paintDay(col, [17, 18], refHdr, dayNum);
       const cell = ws.getCell(`${col}17`);
       cell.value = dayNum <= days ? dayNum : "";
       cell.alignment = { ...(cell.alignment || {}), horizontal: "center", vertical: "middle", wrapText: false };
@@ -1762,6 +1788,7 @@ async function exportToExcel() {
 
       dayCols.forEach((col, idx) => {
         const dayNum = idx + 1;
+        if (refRows[r]) paintDay(col, [r, r + 1], refRows[r], dayNum);
         const cell = ws.getCell(`${col}${r}`);
         cell.alignment = { ...(cell.alignment || {}), horizontal: "center", vertical: "middle", wrapText: false };
         if (dayNum <= maxActiveDay) {
