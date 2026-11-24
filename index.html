@@ -474,6 +474,7 @@
     <button class="btn btn-glass" onclick="openSheetLink()" title="Відкрити Google Таблицю з табелями у новій вкладці">🔗 Відкрити таблицю</button>
     <button class="btn btn-glass" onclick="openEmpModal()">👥 Працівники</button>
     <button class="btn btn-glass" onclick="openVacModal()" title="Графік відпусток на рік: підставляється в табель автоматично">🏖️ Графік відпусток</button>
+    <button class="btn btn-glass" onclick="openBonusModal()" title="Обґрунтування та відсоток премії по працівниках підрозділу">💰 Преміювання</button>
     <button class="btn btn-glass hr-only" onclick="openHrModal()" title="Стан усіх підрозділів за обраний місяць">📋 Кадрова панель</button>
     <button class="btn btn-glass" onclick="window.print()" title="Друк або збереження у PDF (А4, альбомна)">🖨️ Друк / PDF</button>
     <button class="btn btn-success" onclick="exportToExcel()">📥 Завантажити табель (.xlsx)</button>
@@ -681,6 +682,38 @@
   </div>
 </div>
 
+<!-- Преміювання: подання підрозділом -->
+<div class="modal-backdrop" id="bonusModal">
+  <div class="modal" style="max-width:1000px;width:97%;">
+    <h3 id="bonusTitle">💰 Преміювання</h3>
+    <p style="font-size:12.5px; color:var(--muted); margin-top:-6px;">Вкажіть відсоток премії та обґрунтування по кожному працівнику, якому пропонується премія. Порожній відсоток — премія не пропонується. Після узгодження головою рядок стає лише для читання.</p>
+    <div id="bonusBody" style="max-height:60vh; overflow:auto; margin-bottom:12px;"></div>
+    <div style="display:flex; justify-content:flex-end; gap:8px;">
+      <button class="btn btn-outline" onclick="closeBonusModal()">Закрити</button>
+      <button class="btn btn-success" onclick="saveBonus()">📤 Надіслати на узгодження</button>
+    </div>
+  </div>
+</div>
+
+<!-- Преміювання: узгодження головою -->
+<div class="modal-backdrop" id="bonusHeadModal">
+  <div class="modal" style="max-width:1150px;width:98%;">
+    <h3 id="bonusHeadTitle">💼 Узгодження премій</h3>
+    <div id="bonusHeadBody" style="max-height:62vh; overflow:auto; margin-bottom:12px;"></div>
+    <div style="display:flex; justify-content:space-between; flex-wrap:wrap; gap:8px;">
+      <div style="display:flex; gap:8px; flex-wrap:wrap;">
+        <button class="btn btn-outline btn-sm" onclick="loadBonusHead()">🔄 Оновити</button>
+        <button class="btn btn-outline btn-sm" onclick="markAllApproved()">☑️ Позначити всі узгодженими</button>
+        <button class="btn btn-outline btn-sm" onclick="exportBonusXlsx()">⬇️ Усі премії одним файлом (.xlsx)</button>
+      </div>
+      <div style="display:flex; gap:8px;">
+        <button class="btn btn-outline" onclick="closeBonusHead()">Закрити</button>
+        <button class="btn btn-success" onclick="saveBonusHead()">💾 Зберегти</button>
+      </div>
+    </div>
+  </div>
+</div>
+
 <!-- PIN-код -->
 <div class="modal-backdrop" id="pinModal">
   <div class="modal modal-sm">
@@ -727,7 +760,8 @@
       <div style="display:flex; gap:8px; flex-wrap:wrap;">
         <button class="btn btn-outline btn-sm" onclick="loadHr()">🔄 Оновити</button>
         <button class="btn btn-outline btn-sm" onclick="copyUnsent()">📋 Копіювати список тих, хто не надіслав</button>
-        <button class="btn btn-glass btn-sm" onclick="printAllDepts()">🖨️ Друк усіх підрозділів (PDF)</button>
+        <button class="btn btn-outline btn-sm" onclick="printAllDepts()">🖨️ Друк усіх підрозділів (PDF)</button>
+        <button class="btn btn-outline btn-sm" onclick="openBonusHead()">💼 Узгодження премій (голова)</button>
       </div>
       <button class="btn btn-primary" onclick="closeHrModal()">Закрити</button>
     </div>
@@ -1240,6 +1274,161 @@ function copyUnsent() {
   const list = _hrRows.filter(r => !r.sentAt).map((r, i) => (i + 1) + ". " + r.name);
   const txt = list.length ? "Табель за " + hrLabel() + " ще не надіслали:\n" + list.join("\n") : "Усі підрозділи надіслали табель за " + hrLabel();
   (navigator.clipboard ? navigator.clipboard.writeText(txt) : Promise.reject()).then(() => showToast("Список скопійовано"), () => prompt("Скопіюйте список:", txt));
+}
+
+// ===== Преміювання =====
+function bonusPeriod() { return state.year + "-" + String(state.month + 1).padStart(2, "0"); }
+function _attr(x) { return psEsc(x).replace(/"/g, "&quot;"); }
+let _bonusSrv = {};
+function closeBonusModal() { document.getElementById("bonusModal").classList.remove("open"); }
+async function openBonusModal() {
+  if (!cloudUrl()) { openSheetsModal(); showToast("Спершу підключіть Google Таблицю"); return; }
+  document.getElementById("bonusTitle").textContent = "💰 Преміювання — " + MONTHS_UA[state.month] + " " + state.year;
+  document.getElementById("bonusBody").innerHTML = '<p style="color:var(--muted)">⏳ Завантаження…</p>';
+  document.getElementById("bonusModal").classList.add("open");
+  try {
+    const r = await serverCall({ action: "bonusLoad", deptId: state.currentDept, period: bonusPeriod() });
+    if (r.status !== "ok") throw new Error(r.message || "помилка сервера");
+    _bonusSrv = {};
+    (r.rows || []).forEach(x => { _bonusSrv[x.empId] = x; });
+    renderBonus();
+  } catch (e) {
+    document.getElementById("bonusBody").innerHTML = `<p style="color:#b91c1c">Не вдалося завантажити: ${psEsc(e.message)}. Перевірте, що розгорнуто нову версію Apps Script.</p>`;
+  }
+}
+function renderBonus() {
+  let h = '<table class="hr-tbl"><tr><th>№</th><th>Працівник</th><th style="width:90px">Премія, %</th><th>Обґрунтування</th><th style="width:190px">Статус</th></tr>';
+  state.employees.forEach((e, i) => {
+    const sv = _bonusSrv[e.id];
+    const lock = sv && sv.status === "узгоджено";
+    const val = sv && sv.percent !== "" && sv.percent != null ? sv.percent : "";
+    let st = "—";
+    if (sv) {
+      const ap = sv.approved === "" || sv.approved == null ? "" : sv.approved;
+      st = lock ? `✅ Узгоджено: <b>${ap}%</b>` + (sv.comment ? `<br><small>${psEsc(sv.comment)}</small>` : "")
+                : "🕓 На розгляді" + (ap !== "" ? ` (голова: ${ap}%)` : "") + (sv.comment ? `<br><small>${psEsc(sv.comment)}</small>` : "");
+    }
+    h += `<tr><td>${psEsc(e.num)}</td><td>${psEsc(e.name)}</td>` +
+      `<td><input type="number" min="0" max="100" step="0.5" id="bp_${i}" value="${_attr(val)}" ${lock ? "disabled" : ""} style="width:76px"></td>` +
+      `<td><textarea id="br_${i}" rows="2" maxlength="2000" ${lock ? "disabled" : ""} style="width:100%;resize:vertical">${psEsc(sv ? sv.reason : "")}</textarea></td><td>${st}</td></tr>`;
+  });
+  document.getElementById("bonusBody").innerHTML = h + "</table>";
+}
+async function saveBonus() {
+  const items = [];
+  for (let i = 0; i < state.employees.length; i++) {
+    const e = state.employees[i], sv = _bonusSrv[e.id];
+    if (sv && sv.status === "узгоджено") continue;
+    const p = document.getElementById("bp_" + i).value.trim();
+    const reason = document.getElementById("br_" + i).value.trim();
+    if (p === "") { if (sv) items.push({ empId: e.id, name: e.name, percent: null, reason: "" }); continue; }
+    const n = Number(p);
+    if (!isFinite(n) || n < 0 || n > 100) { showToast("Відсоток має бути від 0 до 100: " + e.name); return; }
+    if (!reason) { showToast("Вкажіть обґрунтування премії: " + e.name); return; }
+    items.push({ empId: e.id, name: e.name, percent: n, reason });
+  }
+  try {
+    const r = await serverCall({ action: "bonusSave", deptId: state.currentDept, period: bonusPeriod(), items });
+    if (r.status !== "ok") throw new Error(r.message || "помилка сервера");
+    showToast("Надіслано на узгодження" + (r.locked ? " (узгоджені рядки не змінювались: " + r.locked + ")" : ""));
+    openBonusModal();
+  } catch (e) { showToast("Не вдалося надіслати: " + e.message); }
+}
+
+let _headRows = [];
+function closeBonusHead() { document.getElementById("bonusHeadModal").classList.remove("open"); }
+async function openBonusHead() {
+  if (!cloudUrl()) { openSheetsModal(); showToast("Спершу підключіть Google Таблицю"); return; }
+  document.getElementById("bonusHeadModal").classList.add("open");
+  await loadBonusHead();
+}
+async function loadBonusHead() {
+  const body = document.getElementById("bonusHeadBody");
+  document.getElementById("bonusHeadTitle").textContent = "💼 Узгодження премій — " + MONTHS_UA[state.month] + " " + state.year;
+  body.innerHTML = '<p style="color:var(--muted)">⏳ Завантаження…</p>';
+  try {
+    const r = await serverCall({ action: "bonusAll", period: bonusPeriod() });
+    if (r.status !== "ok") throw new Error(r.message || "помилка сервера");
+    _headRows = r.rows || [];
+    renderBonusHead();
+  } catch (e) {
+    if (e.pinCancelled) { closeBonusHead(); return; }
+    body.innerHTML = `<p style="color:#b91c1c">Не вдалося завантажити: ${psEsc(e.message)}. Перевірте, що розгорнуто нову версію Apps Script.</p>`;
+  }
+}
+function renderBonusHead() {
+  const body = document.getElementById("bonusHeadBody");
+  if (!_headRows.length) { body.innerHTML = '<p style="color:var(--muted)">Підрозділи ще не подали пропозицій за цей місяць.</p>'; return; }
+  const done = _headRows.filter(r => r.status === "узгоджено").length;
+  let h = `<p style="margin:0 0 8px"><b>Пропозицій: ${_headRows.length}</b>, узгоджено: ${done}.</p>`;
+  h += '<table class="hr-tbl"><tr><th>Працівник</th><th>Запропоновано, %</th><th>Обґрунтування</th><th style="width:90px">Узгоджено, %</th><th>Коментар голови</th><th>Узгод.</th></tr>';
+  DEPARTMENTS.forEach(d => {
+    const rs = _headRows.map((r, i) => [r, i]).filter(x => x[0].deptId === d.id);
+    if (!rs.length) return;
+    h += `<tr><td colspan="6" style="background:#eef2f8;font-weight:700">${psEsc(d.name)}</td></tr>`;
+    rs.forEach(x => {
+      const r = x[0], i = x[1];
+      const ap = r.approved === "" || r.approved == null ? r.percent : r.approved;
+      h += `<tr><td>${psEsc(r.name)}</td><td>${r.percent}</td><td style="white-space:pre-wrap">${psEsc(r.reason)}</td>` +
+        `<td><input type="number" min="0" max="100" step="0.5" id="ha_${i}" value="${_attr(ap)}" style="width:76px"></td>` +
+        `<td><input type="text" id="hc_${i}" value="${_attr(r.comment)}" maxlength="500" style="width:100%"></td>` +
+        `<td style="text-align:center"><input type="checkbox" id="hk_${i}" ${r.status === "узгоджено" ? "checked" : ""}></td></tr>`;
+    });
+  });
+  body.innerHTML = h + "</table>";
+}
+function markAllApproved() { _headRows.forEach((r, i) => { const c = document.getElementById("hk_" + i); if (c) c.checked = true; }); }
+async function saveBonusHead() {
+  const items = [];
+  for (let i = 0; i < _headRows.length; i++) {
+    const r = _headRows[i];
+    const a = document.getElementById("ha_" + i).value.trim();
+    if (a !== "" && (!isFinite(Number(a)) || Number(a) < 0 || Number(a) > 100)) { showToast("Відсоток має бути від 0 до 100: " + r.name); return; }
+    items.push({ deptId: r.deptId, empId: r.empId, approvedPercent: a === "" ? null : Number(a), comment: document.getElementById("hc_" + i).value.trim(), approved: document.getElementById("hk_" + i).checked });
+  }
+  try {
+    const res = await serverCall({ action: "bonusApprove", period: bonusPeriod(), items });
+    if (res.status !== "ok") throw new Error(res.message || "помилка сервера");
+    showToast("Збережено");
+    loadBonusHead();
+  } catch (e) { showToast("Не вдалося зберегти: " + e.message); }
+}
+async function exportBonusXlsx() {
+  if (!_headRows.length) { showToast("Немає даних для експорту"); return; }
+  const wb = new ExcelJS.Workbook();
+  const ws = wb.addWorksheet("Премії");
+  ws.columns = [{ width: 5 }, { width: 55 }, { width: 45 }, { width: 14 }, { width: 55 }, { width: 14 }, { width: 40 }, { width: 14 }];
+  ws.addRow(["№", "Підрозділ", "Працівник", "Запропонов., %", "Обґрунтування", "Узгоджено, %", "Коментар голови", "Статус"]);
+  let n = 0;
+  const sum = [];
+  DEPARTMENTS.forEach(d => {
+    const rs = _headRows.filter(r => r.deptId === d.id);
+    if (!rs.length) return;
+    let sp = 0, sa = 0, ca = 0;
+    rs.forEach(r => {
+      const ok = r.status === "узгоджено";
+      const ap = ok && r.approved !== "" && r.approved != null ? Number(r.approved) : "";
+      ws.addRow([++n, d.name, r.name, Number(r.percent), r.reason, ap, r.comment, ok ? "Узгоджено" : "На розгляді"]);
+      sp += Number(r.percent) || 0;
+      if (ap !== "") { sa += ap; ca++; }
+    });
+    sum.push([d.name, rs.length, +(sp / rs.length).toFixed(2), ca, ca ? +(sa / ca).toFixed(2) : ""]);
+  });
+  ws.getRow(1).font = { bold: true };
+  ws.getRow(1).alignment = { wrapText: true, vertical: "middle", horizontal: "center" };
+  ws.eachRow(row => row.eachCell(c => { c.border = { top: { style: "thin" }, left: { style: "thin" }, bottom: { style: "thin" }, right: { style: "thin" } }; if (row.number > 1) c.alignment = { wrapText: true, vertical: "top" }; }));
+  ws.views = [{ state: "frozen", ySplit: 1 }];
+  const w2 = wb.addWorksheet("Підсумок по підрозділах");
+  w2.columns = [{ width: 70 }, { width: 14 }, { width: 18 }, { width: 14 }, { width: 18 }];
+  w2.addRow(["Підрозділ", "Пропозицій", "Середній запропонов., %", "Узгоджено", "Середній узгоджений, %"]).font = { bold: true };
+  sum.forEach(r => w2.addRow(r));
+  const buffer = await wb.xlsx.writeBuffer();
+  const blob = new Blob([buffer], { type: "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet" });
+  const a = document.createElement("a");
+  a.href = URL.createObjectURL(blob);
+  a.download = "Премії_" + MONTHS_UA[state.month] + "_" + state.year + ".xlsx";
+  a.click();
+  setTimeout(() => URL.revokeObjectURL(a.href), 2000);
 }
 
 // ===== Пакетний друк усіх підрозділів =====
@@ -1804,7 +1993,7 @@ function isPristine(id) {
 // ----- PIN-коди: перевіряє сервер; тут лише зберігаємо введене на час сесії вкладки -----
 let _pins = {};
 try { _pins = JSON.parse(sessionStorage.getItem("tabelPins") || "{}") || {}; } catch (e) { _pins = {}; }
-function getPin(pid) { return _pins[pid] || _pins["__admin"] || ""; }
+function getPin(pid) { return pid === "__head" ? (_pins[pid] || "") : (_pins[pid] || _pins["__admin"] || ""); }
 function setPin(pid, v) {
   _pins[pid] = v;
   try { sessionStorage.setItem("tabelPins", JSON.stringify(_pins)); } catch (e) {}
@@ -1819,7 +2008,7 @@ function askPin(pid, msg) {
   const w = { pid: pid };
   w.p = new Promise(res => { w.res = res; });
   _pinWait = w;
-  document.getElementById("pinTitle").textContent = "🔒 PIN-код " + (pid === "__admin" ? "кадрової панелі" : "підрозділу «" + getDept(pid).short + "»");
+  document.getElementById("pinTitle").textContent = "🔒 PIN-код " + (pid === "__admin" ? "кадрової панелі" : pid === "__head" ? "голови (узгодження премій)" : "підрозділу «" + getDept(pid).short + "»");
   document.getElementById("pinMsg").textContent = msg || "";
   document.getElementById("pinInput").value = "";
   document.getElementById("pinModal").classList.add("open");
@@ -1835,7 +2024,7 @@ function submitPin(ok) {
   w.res(ok && v ? v : null);
 }
 async function serverCall(body) {
-  const pid = body.deptId || "__admin";
+  const pid = body.deptId || ((body.action === "bonusAll" || body.action === "bonusApprove") ? "__head" : "__admin");
   for (;;) {
     const res = await fetch(cloudUrl(), {
       method: "POST",
@@ -2654,6 +2843,7 @@ var MONTHS_NOM = ["січень", "лютий", "березень", "квіте�
 // ---------- PIN-коди підрозділів (перевіряються на сервері) ----------
 // Кадрова панель і друк усіх підрозділів доступні за PIN відділу управління персоналом (d10).
 var ADMIN_DEPT = "d10";
+var HEAD_PIN = "1111";   // окремий PIN голови для узгодження премій
 var PINS = {
   d01: "0001", d02: "0002", d03: "0003", d04: "0004", d05: "0005", d06: "0006", d07: "0007",
   d08: "0008", d09: "0009", d10: "0010", d11: "0011", d12: "0012", d13: "0013", d14: "0014",
@@ -2924,11 +3114,19 @@ function doPost(e) {
       if (pe) return jsonOut({ status: "pin", message: pe });
       return jsonOut(handleOverview(ss, String(data.periodLabel || "")));
     }
+    if (action === "bonusAll" || action === "bonusApprove") {
+      var ph = checkPin("__head", pin, [HEAD_PIN]);
+      if (ph) return jsonOut({ status: "pin", message: ph });
+      if (action === "bonusAll") return jsonOut(bonusAll(ss, String(data.period || "")));
+      return jsonOut(bonusApprove(ss, data));
+    }
     var dept = findDept(data.deptId);
     if (!dept) return jsonOut({ status: "error", message: "Невідомий підрозділ" });
     var pe2 = checkPin(dept.id, pin, [PINS[dept.id], PINS[ADMIN_DEPT]]);
     if (pe2) return jsonOut({ status: "pin", message: pe2 });
 
+    if (action === "bonusLoad") return jsonOut(bonusLoad(ss, dept, String(data.period || "")));
+    if (action === "bonusSave") return jsonOut(bonusSave(ss, dept, data));
     if (action === "load") return jsonOut(loadDeptData(ss, dept.id));
     if (action === "save") return jsonOut(saveDeptData(ss, dept.id, data.deptData, data.baseRev, data.force));
     if (action === "sync") return jsonOut(handleSync(data, ss, dept));
@@ -2938,6 +3136,136 @@ function doPost(e) {
   } finally {
     if (locked) lock.releaseLock();
   }
+}
+
+// ---------- Преміювання (аркуш "Премії") ----------
+var BONUS_HEAD = ["Період", "ID підрозділу", "Підрозділ", "ID працівника", "Працівник", "Пропонований %", "Обґрунтування", "Узгоджений %", "Коментар голови", "Статус", "Оновлено"];
+
+function getBonusSheet(ss) {
+  var sh = ss.getSheetByName("Премії");
+  if (sh) return sh;
+  sh = ss.insertSheet("Премії");
+  sh.getRange(1, 1, 1, 11).setValues([BONUS_HEAD]).setFontWeight("bold").setBackground("#e9eff7").setWrap(true).setVerticalAlignment("middle");
+  sh.getRange("A:E").setNumberFormat("@");
+  sh.getRange("G:G").setNumberFormat("@");
+  sh.getRange("I:K").setNumberFormat("@");
+  sh.setFrozenRows(1);
+  sh.setColumnWidth(3, 300);
+  sh.setColumnWidth(5, 280);
+  sh.setColumnWidth(7, 420);
+  sh.setColumnWidth(9, 220);
+  protectWarn(sh);
+  return sh;
+}
+
+function bonusRows(sh) {
+  var last = sh.getLastRow();
+  return last < 2 ? [] : sh.getRange(2, 1, last - 1, 11).getValues();
+}
+
+function bonusObj(r) {
+  return {
+    period: String(r[0]), deptId: String(r[1]), deptName: String(r[2]), empId: String(r[3]), name: String(r[4]),
+    percent: r[5], reason: String(r[6] || ""), approved: r[7], comment: String(r[8] || ""), status: String(r[9] || "")
+  };
+}
+
+function bonusLoad(ss, dept, period) {
+  var vals = bonusRows(getBonusSheet(ss));
+  var out = [];
+  for (var i = 0; i < vals.length; i++) {
+    if (String(vals[i][0]) === period && String(vals[i][1]) === dept.id) out.push(bonusObj(vals[i]));
+  }
+  return { status: "ok", rows: out };
+}
+
+function bonusSave(ss, dept, data) {
+  var period = String(data.period || "");
+  if (period.length !== 7) return { status: "error", message: "Некоректний період" };
+  var items = Array.isArray(data.items) ? data.items : [];
+  var sh = getBonusSheet(ss);
+  var vals = bonusRows(sh);
+  var idx = {};
+  for (var i = 0; i < vals.length; i++) {
+    if (String(vals[i][0]) === period && String(vals[i][1]) === dept.id) idx[String(vals[i][3])] = i;
+  }
+  var now = Utilities.formatDate(new Date(), Session.getScriptTimeZone(), "dd.MM.yyyy HH:mm");
+  var add = [], del = [], saved = 0, locked = 0;
+  for (var k = 0; k < items.length; k++) {
+    var it = items[k] || {};
+    var empId = String(it.empId || "");
+    if (!empId) continue;
+    var has = idx.hasOwnProperty(empId);
+    var ri = has ? idx[empId] : -1;
+    if (has && String(vals[ri][9]) === "узгоджено") { locked++; continue; }
+    if (it.percent === null || it.percent === undefined || it.percent === "") {
+      if (has) del.push(ri + 2);
+      continue;
+    }
+    var pct = Number(it.percent);
+    if (!isFinite(pct) || pct < 0 || pct > 100) return { status: "error", message: "Відсоток має бути від 0 до 100" };
+    var reason = String(it.reason || "").substring(0, 2000);
+    var name = String(it.name || "").substring(0, 300);
+    if (has) {
+      sh.getRange(ri + 2, 5, 1, 3).setValues([[name, pct, reason]]);
+      sh.getRange(ri + 2, 10, 1, 2).setValues([["на розгляді", now]]);
+    } else {
+      add.push([period, dept.id, dept.name, empId, name, pct, reason, "", "", "на розгляді", now]);
+    }
+    saved++;
+  }
+  if (add.length) {
+    var start = sh.getLastRow() + 1;
+    var need = start + add.length - 1;
+    if (sh.getMaxRows() < need) sh.insertRowsAfter(sh.getMaxRows(), need - sh.getMaxRows());
+    sh.getRange(start, 1, add.length, 11).setValues(add);
+  }
+  del.sort(function (a, b) { return b - a; });
+  for (var d = 0; d < del.length; d++) sh.deleteRow(del[d]);
+  return { status: "ok", saved: saved, locked: locked };
+}
+
+function bonusAll(ss, period) {
+  var vals = bonusRows(getBonusSheet(ss));
+  var out = [];
+  for (var i = 0; i < vals.length; i++) {
+    if (String(vals[i][0]) === period) out.push(bonusObj(vals[i]));
+  }
+  var order = {};
+  for (var d = 0; d < DEPARTMENTS.length; d++) order[DEPARTMENTS[d].id] = d;
+  for (var j = 0; j < out.length; j++) out[j]._i = j;
+  out.sort(function (a, b) { return (order[a.deptId] - order[b.deptId]) || (a._i - b._i); });
+  return { status: "ok", rows: out };
+}
+
+function bonusApprove(ss, data) {
+  var period = String(data.period || "");
+  if (period.length !== 7) return { status: "error", message: "Некоректний період" };
+  var items = Array.isArray(data.items) ? data.items : [];
+  var sh = getBonusSheet(ss);
+  var vals = bonusRows(sh);
+  var idx = {};
+  for (var i = 0; i < vals.length; i++) {
+    if (String(vals[i][0]) === period) idx[String(vals[i][1]) + "|" + String(vals[i][3])] = i;
+  }
+  var now = Utilities.formatDate(new Date(), Session.getScriptTimeZone(), "dd.MM.yyyy HH:mm");
+  var n = 0;
+  for (var k = 0; k < items.length; k++) {
+    var it = items[k] || {};
+    var key = String(it.deptId || "") + "|" + String(it.empId || "");
+    if (!idx.hasOwnProperty(key)) continue;
+    var ri = idx[key];
+    var ap = "";
+    if (it.approvedPercent !== null && it.approvedPercent !== undefined && it.approvedPercent !== "") {
+      ap = Number(it.approvedPercent);
+      if (!isFinite(ap) || ap < 0 || ap > 100) return { status: "error", message: "Відсоток має бути від 0 до 100" };
+    }
+    var approved = !!it.approved;
+    if (approved && ap === "") ap = vals[ri][5];
+    sh.getRange(ri + 2, 8, 1, 4).setValues([[ap, String(it.comment || "").substring(0, 500), approved ? "узгоджено" : "на розгляді", now]]);
+    n++;
+  }
+  return { status: "ok", updated: n };
 }
 
 // ---------- Запис табеля місяця в аркуш підрозділу ----------
