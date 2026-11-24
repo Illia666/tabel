@@ -680,6 +680,22 @@
   </div>
 </div>
 
+<!-- PIN-код -->
+<div class="modal-backdrop" id="pinModal">
+  <div class="modal modal-sm">
+    <h3 id="pinTitle">🔒 PIN-код</h3>
+    <p id="pinMsg" style="font-size:13px; color:var(--muted); margin-top:-6px;"></p>
+    <div class="field" style="margin-bottom:14px;">
+      <label>PIN-код</label>
+      <input type="password" id="pinInput" inputmode="numeric" autocomplete="off" maxlength="12" onkeydown="if(event.key==='Enter')submitPin(true)" />
+    </div>
+    <div style="display:flex; justify-content:flex-end; gap:8px;">
+      <button class="btn btn-outline" onclick="submitPin(false)">Скасувати</button>
+      <button class="btn btn-primary" onclick="submitPin(true)">Увійти</button>
+    </div>
+  </div>
+</div>
+
 <!-- Графік відпусток -->
 <div class="modal-backdrop" id="vacModal">
   <div class="modal" style="max-width:760px;width:96%;">
@@ -1228,6 +1244,7 @@ function copyUnsent() {
 // ===== Пакетний друк усіх підрозділів =====
 async function printAllDepts() {
   if (!cloudUrl()) { showToast("Спершу підключіть Google Таблицю"); return; }
+  try { await serverCall({ action: "overview", periodLabel: hrLabel() }); } catch (e) { showToast("Для друку всіх підрозділів потрібен PIN кадрової панелі"); return; }
   showToast("⏳ Завантажую табелі підрозділів…");
   saveState();
   stashActiveDept();
@@ -1783,14 +1800,59 @@ function isPristine(id) {
   return true;
 }
 
+// ----- PIN-коди: перевіряє сервер; тут лише зберігаємо введене на час сесії вкладки -----
+let _pins = {};
+try { _pins = JSON.parse(sessionStorage.getItem("tabelPins") || "{}") || {}; } catch (e) { _pins = {}; }
+function getPin(pid) { return _pins[pid] || _pins["__admin"] || ""; }
+function setPin(pid, v) {
+  _pins[pid] = v;
+  try { sessionStorage.setItem("tabelPins", JSON.stringify(_pins)); } catch (e) {}
+}
+function clearPin(pid) {
+  delete _pins[pid];
+  try { sessionStorage.setItem("tabelPins", JSON.stringify(_pins)); } catch (e) {}
+}
+let _pinWait = null;
+function askPin(pid, msg) {
+  if (_pinWait) return _pinWait.p;
+  const w = { pid: pid };
+  w.p = new Promise(res => { w.res = res; });
+  _pinWait = w;
+  document.getElementById("pinTitle").textContent = "🔒 PIN-код " + (pid === "__admin" ? "кадрової панелі" : "підрозділу «" + getDept(pid).short + "»");
+  document.getElementById("pinMsg").textContent = msg || "";
+  document.getElementById("pinInput").value = "";
+  document.getElementById("pinModal").classList.add("open");
+  setTimeout(() => document.getElementById("pinInput").focus(), 50);
+  return w.p;
+}
+function submitPin(ok) {
+  const w = _pinWait;
+  if (!w) return;
+  const v = document.getElementById("pinInput").value.trim();
+  document.getElementById("pinModal").classList.remove("open");
+  _pinWait = null;
+  w.res(ok && v ? v : null);
+}
 async function serverCall(body) {
-  const res = await fetch(cloudUrl(), {
-    method: "POST",
-    headers: { "Content-Type": "text/plain;charset=utf-8" },
-    body: JSON.stringify(body)
-  });
-  const txt = await res.text();
-  try { return JSON.parse(txt); } catch (e) { throw new Error("Некоректна відповідь сервера (перевірте, що розгорнуто нову версію Apps Script)"); }
+  const pid = body.deptId || "__admin";
+  for (;;) {
+    const res = await fetch(cloudUrl(), {
+      method: "POST",
+      headers: { "Content-Type": "text/plain;charset=utf-8" },
+      body: JSON.stringify(Object.assign({}, body, { pin: getPin(pid) }))
+    });
+    const txt = await res.text();
+    let r;
+    try { r = JSON.parse(txt); } catch (e) { throw new Error("Некоректна відповідь сервера (перевірте, що розгорнуто нову версію Apps Script)"); }
+    if (r && r.status === "pin") {
+      clearPin(pid);
+      const p = await askPin(pid, r.message);
+      if (!p) { const er = new Error("PIN-код не введено"); er.pinCancelled = true; throw er; }
+      setPin(pid, p);
+      continue;
+    }
+    return r;
+  }
 }
 
 // Виклик сервера для підрозділу
@@ -1998,13 +2060,14 @@ async function pushToGoogleSheets() {
     }
   } catch (err) {
     console.warn(err);
+    if (err && err.pinCancelled) { setCloudStatus("err", "🔒 Потрібен PIN-код"); showToast("Табель не надіслано: PIN-код не введено"); return; }
     // Запасний варіант: відправка без підтвердження (якщо браузер не дає прочитати відповідь)
     try {
       await fetch(webAppUrl, {
         method: "POST",
         mode: "no-cors",
         headers: { "Content-Type": "text/plain;charset=utf-8" },
-        body: JSON.stringify(Object.assign({ action: "sync", deptId: dept.id, pin: "" }, payload))
+        body: JSON.stringify(Object.assign({ action: "sync", deptId: dept.id, pin: getPin(dept.id) }, payload))
       });
       setCloudStatus("off", "☁️ Надіслано без підтвердження");
       showToast(`📨 Надіслано (без підтвердження сервера): «${monthNameCap} ${state.year}»`);
@@ -2587,6 +2650,29 @@ var BACKUP_FOLDER = "Резервні копії табеля";   // папка 
 var BACKUP_KEEP = 30;                          // скільки останніх копій зберігати
 var MONTHS_NOM = ["січень", "лютий", "березень", "квітень", "травень", "червень", "липень", "серпень", "вересень", "жовтень", "листопад", "грудень"];
 
+// ---------- PIN-коди підрозділів (перевіряються на сервері) ----------
+// Кадрова панель і друк усіх підрозділів доступні за PIN відділу управління персоналом (d10).
+var ADMIN_DEPT = "d10";
+var PINS = {
+  d01: "0001", d02: "0002", d03: "0003", d04: "0004", d05: "0005", d06: "0006", d07: "0007",
+  d08: "0008", d09: "0009", d10: "0010", d11: "0011", d12: "0012", d13: "0013", d14: "0014",
+  d15: "0015", d16: "0016", d17: "0017", d18: "0018", d19: "0019"
+};
+
+// Повертає "" якщо PIN вірний, інакше текст помилки. Після 10 невдалих спроб — блокування на 10 хвилин.
+function checkPin(key, pin, allowed) {
+  var cache = CacheService.getScriptCache();
+  var ck = "pinfail_" + key;
+  var fails = Number(cache.get(ck) || 0);
+  if (fails >= 10) return "Забагато невдалих спроб. Спробуйте через 10 хвилин";
+  if (!pin) return "Введіть PIN-код";
+  for (var i = 0; i < allowed.length; i++) {
+    if (String(allowed[i]) === String(pin)) { cache.remove(ck); return ""; }
+  }
+  cache.put(ck, String(fails + 1), 600);
+  return "Невірний PIN-код";
+}
+
 function jsonOut(o) {
   return ContentService.createTextOutput(JSON.stringify(o)).setMimeType(ContentService.MimeType.JSON);
 }
@@ -2831,9 +2917,16 @@ function doPost(e) {
     var data = JSON.parse(e.postData.contents);
     var ss = SpreadsheetApp.getActiveSpreadsheet();
     var action = data.action || "sync";
-    if (action === "overview") return jsonOut(handleOverview(ss, String(data.periodLabel || "")));
+    var pin = String(data.pin || "");
+    if (action === "overview") {
+      var pe = checkPin("__admin", pin, [PINS[ADMIN_DEPT]]);
+      if (pe) return jsonOut({ status: "pin", message: pe });
+      return jsonOut(handleOverview(ss, String(data.periodLabel || "")));
+    }
     var dept = findDept(data.deptId);
     if (!dept) return jsonOut({ status: "error", message: "Невідомий підрозділ" });
+    var pe2 = checkPin(dept.id, pin, [PINS[dept.id], PINS[ADMIN_DEPT]]);
+    if (pe2) return jsonOut({ status: "pin", message: pe2 });
 
     if (action === "load") return jsonOut(loadDeptData(ss, dept.id));
     if (action === "save") return jsonOut(saveDeptData(ss, dept.id, data.deptData, data.baseRev, data.force));
