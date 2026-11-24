@@ -450,7 +450,13 @@
       opacity: 1;
       transform: translateY(0);
     }
-  </style>
+      @media print { .ps-batch { page-break-after: always; } .ps-batch:last-child { page-break-after: auto; } }
+    .hr-tbl { width:100%; border-collapse:collapse; font-size:13px; }
+    .hr-tbl th, .hr-tbl td { border:1px solid #d5dbe5; padding:5px 8px; text-align:left; }
+    .hr-tbl th { background:#eef2f8; }
+    .hr-tbl tr.hr-no td { background:#fde8e8; }
+    .hr-tbl tr.hr-ok td.hr-st { background:#dcfce7; }
+</style>
 </head>
 <body>
 
@@ -466,6 +472,8 @@
     <button class="btn btn-primary" onclick="pushToGoogleSheets()" title="Створити/оновити аркуш поточного місяця у Google Таблиці">🔄 Синхронізувати таблицю</button>
     <button class="btn btn-glass" onclick="openSheetLink()" title="Відкрити Google Таблицю з табелями у новій вкладці">🔗 Відкрити таблицю</button>
     <button class="btn btn-glass" onclick="openEmpModal()">👥 Працівники</button>
+    <button class="btn btn-glass" onclick="openVacModal()" title="Графік відпусток на рік: підставляється в табель автоматично">🏖️ Графік відпусток</button>
+    <button class="btn btn-glass hr-only" onclick="openHrModal()" title="Стан усіх підрозділів за обраний місяць">📋 Кадрова панель</button>
     <button class="btn btn-glass" onclick="window.print()" title="Друк або збереження у PDF (А4, альбомна)">🖨️ Друк / PDF</button>
     <button class="btn btn-success" onclick="exportToExcel()">📥 Завантажити табель (.xlsx)</button>
   </div>
@@ -481,6 +489,13 @@
         <span id="cloudStatus" class="cloud-status off" title="Стан збереження табеля підрозділу на сервері (Google Таблиця)">☁️ Сервер: не підключено</span>
         <button class="btn btn-outline" onclick="copyDeptLink()" title="Скопіювати персональне посилання цього підрозділу (вибір підрозділу буде заблоковано)">📎 Посилання підрозділу</button>
       </div>
+    </div>
+    <div class="field" style="flex:0 0 100%;">
+      <label>Святкові й скорочені дні</label>
+      <select id="holidayModeSelect" onchange="changeHolidayMode()" style="max-width:720px;">
+        <option value="manual">Вручну (воєнний стан: ст. 73 та 53 КЗпП не застосовуються)</option>
+        <option value="calendar">За календарем України (ст. 73 КЗпП, перенесення, скорочені передсвяткові дні)</option>
+      </select>
     </div>
     <div class="controls-group">
       <div class="field">
@@ -665,6 +680,43 @@
   </div>
 </div>
 
+<!-- Графік відпусток -->
+<div class="modal-backdrop" id="vacModal">
+  <div class="modal" style="max-width:760px;width:96%;">
+    <h3>🏖️ Графік відпусток</h3>
+    <p style="font-size:12.5px; color:var(--muted); margin-top:-6px;">Внесіть відпустки один раз — вони підставляються в табель кожного відповідного місяця автоматично (вихідні та свята пропускаються).</p>
+    <div style="display:flex; gap:8px; flex-wrap:wrap; align-items:flex-end; margin-bottom:12px;">
+      <div class="field"><label>Працівник</label><select id="vacEmp" style="min-width:230px;"></select></div>
+      <div class="field"><label>Код</label><select id="vacCode"></select></div>
+      <div class="field"><label>З</label><input type="date" id="vacFrom"></div>
+      <div class="field"><label>По</label><input type="date" id="vacTo"></div>
+      <div class="field"><label>Наказ (необов'язково)</label><input type="text" id="vacNote" placeholder="№ 88-в від 06.11.2026"></div>
+      <button class="btn btn-success btn-sm" onclick="addVacation()">➕ Додати</button>
+    </div>
+    <div id="vacList" style="max-height:300px; overflow-y:auto; margin-bottom:12px;"></div>
+    <div style="display:flex; justify-content:space-between; gap:8px;">
+      <button class="btn btn-outline" onclick="applyVacationsNow()">Застосувати до поточного місяця</button>
+      <button class="btn btn-primary" onclick="closeVacModal()">Готово</button>
+    </div>
+  </div>
+</div>
+
+<!-- Кадрова панель -->
+<div class="modal-backdrop" id="hrModal">
+  <div class="modal" style="max-width:1020px;width:97%;">
+    <h3 id="hrTitle">📋 Кадрова панель</h3>
+    <div id="hrBody" style="max-height:62vh; overflow:auto; margin-bottom:12px;"></div>
+    <div style="display:flex; justify-content:space-between; flex-wrap:wrap; gap:8px;">
+      <div style="display:flex; gap:8px; flex-wrap:wrap;">
+        <button class="btn btn-outline btn-sm" onclick="loadHr()">🔄 Оновити</button>
+        <button class="btn btn-outline btn-sm" onclick="copyUnsent()">📋 Копіювати список тих, хто не надіслав</button>
+        <button class="btn btn-glass btn-sm" onclick="printAllDepts()">🖨️ Друк усіх підрозділів (PDF)</button>
+      </div>
+      <button class="btn btn-primary" onclick="closeHrModal()">Закрити</button>
+    </div>
+  </div>
+</div>
+
 <!-- Модальне вікно синхронізації з Google Таблицею -->
 <div class="modal-backdrop" id="sheetsModal">
   <div class="modal">
@@ -805,7 +857,7 @@ const DEFAULT_DEPT_ID = "d08";
 const DEFAULT_SHEET_VIEW_URL = "https://docs.google.com/spreadsheets/d/1sgZBlQZT3Hk4kedsZnHppY9zUYS0a-Cz7yl4U9X6rWo/edit";
 const DEFAULT_WEBAPP_URL = "https://script.google.com/macros/s/AKfycbx8Oht2k84PdjcVS4_HnQMRmgnGy7d9ExdgXY9M068rnD6QRbLV9m7hFrl11kokzRfc/exec";
 const STORAGE_KEY = "dsusd_tabel_state_v3";
-const ACTIVE_FIELDS = ["employees", "records", "notes", "holidays", "signerHead", "signerHr"];
+const ACTIVE_FIELDS = ["employees", "records", "notes", "holidays", "signerHead", "signerHr", "vacations"];
 let LOCKED_DEPT = false;
 
 function getDept(id) {
@@ -821,7 +873,7 @@ function newDeptData(deptId, hr) {
   if (deptId === DEFAULT_DEPT_ID) {
     return {
       employees: JSON.parse(JSON.stringify(DEFAULT_EMPLOYEES)),
-      records: {}, notes: {}, holidays: {},
+      records: {}, notes: {}, holidays: {}, vacations: [],
       signerHead: "Лисюк А.М.", signerHr: "Якуніна Т.В."
     };
   }
@@ -831,7 +883,7 @@ function newDeptData(deptId, hr) {
       name: "Прізвище Ім'я По-батькові, посада",
       dept: getDept(deptId).name
     }],
-    records: {}, notes: {}, holidays: {},
+    records: {}, notes: {}, holidays: {}, vacations: [],
     signerHead: "", signerHr: hr || ""
   };
 }
@@ -850,6 +902,7 @@ function activateDept(id) {
   if (!d.records) d.records = {};
   if (!d.notes) d.notes = {};
   if (!d.holidays) d.holidays = {};
+  if (!Array.isArray(d.vacations)) d.vacations = [];
   state.currentDept = id;
   ACTIVE_FIELDS.forEach(f => { state[f] = d[f]; });
 }
@@ -993,8 +1046,216 @@ function isWeekend(year, month, day) {
 
 function isHoliday(year, month, day) {
   const key = getPeriodKey(year, month);
-  return (state.holidays[key] || []).includes(day);
+  if ((state.holidays[key] || []).includes(day)) return true;
+  return state.holidayMode === "calendar" && calHolidaySet(year).off.has(_fmtD(new Date(year, month, day)));
 }
+
+// ===== Календар свят України (ст. 73 КЗпП) =====
+const _calCache = {};
+function _p2(n) { return String(n).padStart(2, "0"); }
+function _fmtD(dt) { return dt.getFullYear() + "-" + _p2(dt.getMonth() + 1) + "-" + _p2(dt.getDate()); }
+function orthodoxEaster(y) {
+  const a = y % 4, b = y % 7, c = y % 19, d = (19 * c + 15) % 30, e = (2 * a + 4 * b - d + 34) % 7;
+  const mo = Math.floor((d + e + 114) / 31), dy = ((d + e + 114) % 31) + 1;
+  const dt = new Date(y, mo - 1, dy);
+  dt.setDate(dt.getDate() + (y >= 2100 ? 14 : 13));
+  return dt;
+}
+function calHolidaySet(y) {
+  if (_calCache[y]) return _calCache[y];
+  const base = [[0, 1], [2, 8], [4, 1], [4, 8], [5, 28], [6, 15], [7, 24], [9, 1], [11, 25]].map(a => new Date(y, a[0], a[1]));
+  const e = orthodoxEaster(y);
+  const t = new Date(e); t.setDate(t.getDate() + 49);
+  base.push(e, t);
+  const orig = new Set(base.map(_fmtD));
+  const off = new Set(orig);
+  base.forEach(dt => {
+    const w = dt.getDay();
+    if (w === 0 || w === 6) {
+      const n = new Date(dt);
+      do { n.setDate(n.getDate() + 1); } while (n.getDay() === 0 || n.getDay() === 6 || off.has(_fmtD(n)));
+      off.add(_fmtD(n));
+    }
+  });
+  return (_calCache[y] = { orig, off });
+}
+// День напередодні вихідного/святкового — скорочений на 1 годину (ст. 53 КЗпП), лише в режимі «за календарем»
+function isShortDay(y, m, d) {
+  if (state.holidayMode !== "calendar" || isNonWorkingDay(y, m, d)) return false;
+  const n = new Date(y, m, d + 1);
+  return calHolidaySet(n.getFullYear()).off.has(_fmtD(n));
+}
+function shortDaysCount(y, m, maxD) {
+  let c = 0;
+  for (let d = 1; d <= maxD; d++) if (isShortDay(y, m, d)) c++;
+  return c;
+}
+function shortNormNote(y, m, maxD, norm) {
+  const n = shortDaysCount(y, m, maxD);
+  return n ? ` (скорочених передсвяткових днів: ${n}; норма ${norm * 8 - n} год.)` : "";
+}
+function effectiveHolidays(y, m) {
+  const key = getPeriodKey(y, m);
+  const out = [];
+  for (let d = 1; d <= getDaysInMonth(y, m); d++) {
+    if ((state.holidays[key] || []).includes(d) || isHoliday(y, m, d)) out.push(d);
+  }
+  return out;
+}
+function changeHolidayMode() {
+  state.holidayMode = document.getElementById("holidayModeSelect").value;
+  saveState();
+  renderAll();
+  showToast(state.holidayMode === "calendar"
+    ? "Свята за календарем увімкнено. Щоб оновити вже заповнені дні, натисніть «🔄 Будні (Р)»"
+    : "Святкові дні — вручну");
+}
+
+// ===== Графік відпусток =====
+function applyVacationsToMonth(y, m) {
+  const key = getPeriodKey(y, m);
+  const vac = state.vacations || [];
+  if (!vac.length || !state.records[key]) return 0;
+  const days = getDaysInMonth(y, m);
+  let n = 0;
+  vac.forEach(v => {
+    const a = new Date(v.from + "T00:00:00"), b = new Date(v.to + "T00:00:00");
+    if (isNaN(a) || isNaN(b)) return;
+    for (let d = 1; d <= days; d++) {
+      const dt = new Date(y, m, d);
+      if (dt < a || dt > b || isNonWorkingDay(y, m, d)) continue;
+      if (!state.records[key][v.empId]) state.records[key][v.empId] = {};
+      state.records[key][v.empId][d] = v.code;
+      if (v.note) {
+        if (!state.notes[key]) state.notes[key] = {};
+        if (!state.notes[key][v.empId]) state.notes[key][v.empId] = {};
+        state.notes[key][v.empId][d] = v.note;
+      }
+      n++;
+    }
+  });
+  return n;
+}
+function openVacModal() {
+  document.getElementById("vacEmp").innerHTML = state.employees.map(e => `<option value="${e.id}">${e.num}. ${psEsc(e.name)}</option>`).join("");
+  const code = document.getElementById("vacCode");
+  code.innerHTML = document.getElementById("evCode").innerHTML;
+  code.value = "В";
+  renderVacList();
+  document.getElementById("vacModal").classList.add("open");
+}
+function closeVacModal() { document.getElementById("vacModal").classList.remove("open"); }
+function renderVacList() {
+  const host = document.getElementById("vacList");
+  const list = state.vacations || [];
+  if (!list.length) { host.innerHTML = '<p style="color:var(--muted);font-size:13px;">Відпусток ще не внесено.</p>'; return; }
+  const fd = s => s.split("-").reverse().join(".");
+  host.innerHTML = '<table class="hr-tbl"><tr><th>Працівник</th><th>Код</th><th>Період</th><th>Наказ</th><th></th></tr>' +
+    list.map((v, i) => {
+      const e = state.employees.find(x => x.id === v.empId);
+      return `<tr><td>${psEsc(e ? e.name : "(видалений працівник)")}</td><td>${psEsc(v.code)}</td><td>${fd(v.from)} — ${fd(v.to)}</td><td>${psEsc(v.note || "")}</td><td><button class="btn btn-outline btn-sm" onclick="removeVacation(${i})">✕</button></td></tr>`;
+    }).join("") + "</table>";
+}
+function addVacation() {
+  const empId = document.getElementById("vacEmp").value;
+  const from = document.getElementById("vacFrom").value, to = document.getElementById("vacTo").value;
+  if (!empId || !from || !to) { showToast("Вкажіть працівника та дати «З» і «По»"); return; }
+  if (from > to) { showToast("Дата «З» пізніша за «По»"); return; }
+  state.vacations.push({ empId, code: document.getElementById("vacCode").value, from, to, note: document.getElementById("vacNote").value.trim() });
+  document.getElementById("vacNote").value = "";
+  applyVacationsToMonth(state.year, state.month);
+  saveState(); renderAll(); renderVacList();
+  showToast("Відпустку додано та підставлено в табель");
+}
+function removeVacation(i) {
+  state.vacations.splice(i, 1);
+  saveState(); renderVacList();
+  showToast("Відпустку видалено з графіка (вже підставлені дні в табелі залишились — змініть їх вручну)");
+}
+function applyVacationsNow() {
+  ensureMonthInitialized(state.year, state.month);
+  const n = applyVacationsToMonth(state.year, state.month);
+  saveState(); renderAll();
+  showToast(n ? `Підставлено днів відпустки: ${n}` : "У цьому місяці відпусток за графіком немає");
+}
+
+// ===== Кадрова панель =====
+let _hrRows = [];
+function hrLabel() { return MONTHS_UA[state.month].toLowerCase() + " " + state.year + (state.halfMode === "first_half" ? " (1-15)" : ""); }
+function closeHrModal() { document.getElementById("hrModal").classList.remove("open"); }
+async function openHrModal() {
+  if (!cloudUrl()) { openSheetsModal(); showToast("Спершу підключіть Google Таблицю"); return; }
+  document.getElementById("hrModal").classList.add("open");
+  await loadHr();
+}
+async function loadHr() {
+  const body = document.getElementById("hrBody");
+  document.getElementById("hrTitle").textContent = "📋 Кадрова панель — " + hrLabel();
+  body.innerHTML = '<p style="color:var(--muted)">⏳ Завантаження…</p>';
+  try {
+    const r = await serverCall({ action: "overview", periodLabel: hrLabel() });
+    if (r.status !== "ok") throw new Error(r.message || "помилка сервера");
+    _hrRows = r.rows || [];
+    renderHr();
+  } catch (e) {
+    body.innerHTML = `<p style="color:#b91c1c">Не вдалося завантажити: ${psEsc(e.message)}. Перевірте, що розгорнуто нову версію Apps Script.</p>`;
+  }
+}
+function renderHr() {
+  const sent = _hrRows.filter(r => r.sentAt).length;
+  const t = _hrRows.reduce((a, r) => { a.c += +r.count || 0; a.w += +r.worked || 0; return a; }, { c: 0, w: 0 });
+  let h = `<p style="margin:0 0 8px"><b>Надіслали: ${sent} з ${_hrRows.length}</b>. Працівників: ${t.c}, відпрацьовано днів: ${t.w}.</p>`;
+  h += '<table class="hr-tbl"><tr><th>№</th><th>Підрозділ</th><th>Статус</th><th>Працівників</th><th>Відпр. днів</th><th>Відпустки</th><th>Лікарняні</th><th>Відрядж.</th><th></th></tr>';
+  _hrRows.forEach((r, i) => {
+    const ok = !!r.sentAt;
+    h += `<tr class="${ok ? "hr-ok" : "hr-no"}"><td>${i + 1}</td><td>${psEsc(r.name)}</td><td class="hr-st">${ok ? "✅ " + psEsc(r.sentAt) : "❌ не надіслано"}</td>` +
+      `<td>${ok ? r.count : ""}</td><td>${ok ? r.worked : ""}</td><td>${ok ? (+r.study || 0) + (+r.leave || 0) : ""}</td><td>${ok ? r.sick : ""}</td><td>${ok ? r.trip : ""}</td>` +
+      `<td><button class="btn btn-outline btn-sm" onclick="openDeptFromHr('${r.id}')">Відкрити</button></td></tr>`;
+  });
+  document.getElementById("hrBody").innerHTML = h + "</table>";
+}
+function openDeptFromHr(id) {
+  document.getElementById("deptSelect").value = id;
+  closeHrModal();
+  changeDept();
+}
+function copyUnsent() {
+  const list = _hrRows.filter(r => !r.sentAt).map((r, i) => (i + 1) + ". " + r.name);
+  const txt = list.length ? "Табель за " + hrLabel() + " ще не надіслали:\n" + list.join("\n") : "Усі підрозділи надіслали табель за " + hrLabel();
+  (navigator.clipboard ? navigator.clipboard.writeText(txt) : Promise.reject()).then(() => showToast("Список скопійовано"), () => prompt("Скопіюйте список:", txt));
+}
+
+// ===== Пакетний друк усіх підрозділів =====
+async function printAllDepts() {
+  if (!cloudUrl()) { showToast("Спершу підключіть Google Таблицю"); return; }
+  showToast("⏳ Завантажую табелі підрозділів…");
+  saveState();
+  stashActiveDept();
+  const snap = JSON.parse(JSON.stringify(state.depts));
+  const orig = state.currentDept;
+  const host = document.getElementById("printSheet");
+  const key = getPeriodKey(state.year, state.month);
+  const parts = [], skipped = [];
+  for (const d of DEPARTMENTS) {
+    try {
+      const r = await serverAuthCall(d.id, "load");
+      if (!r || !r.found || !r.data) { skipped.push(d.short); continue; }
+      state.depts[d.id] = normalizeDeptData(r.data, d.id);
+      activateDept(d.id);
+      if (!state.records[key]) { skipped.push(d.short); continue; }
+      renderPrintMeta();
+      parts.push(host.innerHTML);
+    } catch (e) { skipped.push(d.short); }
+  }
+  state.depts = snap;
+  activateDept(orig);
+  if (!parts.length) { renderAll(); showToast("Немає табелів за обраний місяць"); return; }
+  host.innerHTML = parts.map(p => `<div class="ps-batch">${p}</div>`).join("");
+  if (skipped.length) showToast("Без табеля за місяць (пропущено): " + skipped.join(", "));
+  setTimeout(() => window.print(), 400);
+}
+window.addEventListener("afterprint", () => { try { renderPrintMeta(); } catch (e) {} });
+
 
 function isNonWorkingDay(year, month, day) {
   return isWeekend(year, month, day) || isHoliday(year, month, day);
@@ -1020,6 +1281,7 @@ function ensureMonthInitialized(year, month, applyNovPreset = false) {
         Object.assign(state.records[key][emp.id], NOV_2026_PRESET[emp.id]);
       }
     });
+    applyVacationsToMonth(year, month);
     saveState();
   } else {
     state.employees.forEach(emp => {
@@ -1214,6 +1476,8 @@ function renderAll() {
   document.getElementById("deptTitle").textContent = "Державна служба України у справах дітей • " + getDept(state.currentDept).name;
   document.getElementById("deptSelect").value = state.currentDept;
   renderPrintMeta();
+  document.getElementById("holidayModeSelect").value = state.holidayMode || "manual";
+  document.querySelectorAll(".hr-only").forEach(el => { el.style.display = LOCKED_DEPT ? "none" : ""; });
   const evEmp = document.getElementById("evEmp");
   const prevEmp = evEmp.value;
   evEmp.innerHTML = state.employees.map(e => `<option value="${e.id}">${e.num}. ${e.name}</option>`).join("");
@@ -1230,7 +1494,7 @@ function renderAll() {
     <th class="col-name" rowspan="2">Прізвище, ім'я, по-батькові, посада</th>`;
   for (let d = 1; d <= days; d++) {
     const dow = new Date(y, m, d).getDay();
-    const isHol = monthHolidays.includes(d);
+    const isHol = isHoliday(y, m, d);
     const wk = isHol ? "holiday-th" : ((dow === 0 || dow === 6) ? "wknd" : "");
     const locked = d > maxActiveDay ? "locked-day" : "";
     const label = isHol ? "Св" : DAYS_SHORT[dow];
@@ -1274,7 +1538,7 @@ function renderAll() {
     for (let d = 1; d <= days; d++) {
       const locked = d > maxActiveDay;
       const code = locked ? "" : (rec[d] || "");
-      const isHol = monthHolidays.includes(d);
+      const isHol = isHoliday(y, m, d);
       const wk = isHol && !code ? "holiday-th" : (isWeekend(y, m, d) && !code ? "wknd" : "");
       const cls = code ? `c-${code}` : wk;
       const note = empNotes[d];
@@ -1302,6 +1566,7 @@ function renderAll() {
   document.getElementById("tabelBody").innerHTML = bodyHtml;
 
   document.getElementById("kpiNormDays").textContent = normWorkdays;
+  document.getElementById("kpiNormDays").title = shortDaysCount(y, m, maxActiveDay) ? "Норма " + (normWorkdays * 8 - shortDaysCount(y, m, maxActiveDay)) + " год. (є скорочені передсвяткові дні)" : "";
   document.getElementById("kpiCalDays").textContent = maxActiveDay;
   document.getElementById("kpiEmpCount").textContent = state.employees.length;
   document.getElementById("kpiAbsences").textContent = `${totalTrips} / ${totalLeaves} / ${totalSicks}`;
@@ -1486,6 +1751,7 @@ function normalizeDeptData(d, id) {
   const o = Object.assign({}, base, d || {});
   if (!Array.isArray(o.employees) || !o.employees.length) o.employees = base.employees;
   ["records", "notes", "holidays"].forEach(f => { if (!o[f] || typeof o[f] !== "object") o[f] = {}; });
+  if (!Array.isArray(o.vacations)) o.vacations = [];
   o.signerHead = o.signerHead || "";
   o.signerHr = o.signerHr || "";
   return o;
@@ -1715,7 +1981,7 @@ async function pushToGoogleSheets() {
     employees: state.employees,
     records: state.records[key] || {},
     notes: state.notes[key] || {},
-    holidays: state.holidays[key] || []
+    holidays: effectiveHolidays(state.year, state.month)
   };
 
   const monthNameCap = MONTHS_UA[state.month].charAt(0).toUpperCase() + MONTHS_UA[state.month].slice(1);
@@ -1816,7 +2082,7 @@ function renderPrintMeta() {
   h += `<div class="ps-code"><i>Код ЄДРПОУ</i> &nbsp;<b>45221108</b></div>`;
   h += `<div class="ps-title">ТАБЕЛЬ ОБЛІКУ ВИКОРИСТАННЯ РОБОЧОГО ЧАСУ</div>`;
   h += `<div class="ps-month">${psEsc(MONTHS_UA[mo])} ${y} року${half}</div>`;
-  h += `<div class="ps-row"><div class="ps-norm">Кількість робочих днів при 5-денному робочому тижні - ${norm}</div>` +
+  h += `<div class="ps-row"><div class="ps-norm">Кількість робочих днів при 5-денному робочому тижні - ${norm}${shortNormNote(y, mo, maxD, norm)}</div>` +
        `<table class="ps-box"><tr><th rowspan="3">Дата<br>заповнення<span class="ps-fill">${psEsc(fill)}</span></th><th colspan="2">Звітний період</th></tr>` +
        `<tr><th>з</th><th>по</th></tr><tr><td>01.${pad(mo + 1)}.${y}</td><td>${pad(maxD)}.${pad(mo + 1)}.${y}</td></tr></table></div>`;
   h += `<div class="ps-dept">${psEsc(dept.name)}</div>`;
@@ -2114,7 +2380,7 @@ async function exportToExcel() {
 
     const halfSuffix = state.halfMode === "first_half" ? " (за першу половину місяця)" : "";
     ws.getCell("C6").value = `${MONTHS_UA[m]} ${y} року${halfSuffix}`;
-    ws.getCell("D8").value = `Кількість робочих днів при 5-денному робочому тижні - ${normWorkdays}`;
+    ws.getCell("D8").value = `Кількість робочих днів при 5-денному робочому тижні - ${normWorkdays}${shortNormNote(y, m, maxActiveDay, normWorkdays)}`;
 
     const startDate = new Date(Date.UTC(y, m, 1));
     const endDate = new Date(Date.UTC(y, m, maxActiveDay));
@@ -2316,6 +2582,11 @@ var DEPARTMENTS = [
 
 var SYNC_CHUNK = 40000;
 
+// ---- Налаштування нагадувань і резервних копій ----
+var BACKUP_FOLDER = "Резервні копії табеля";   // папка в Google Диску
+var BACKUP_KEEP = 30;                          // скільки останніх копій зберігати
+var MONTHS_NOM = ["січень", "лютий", "березень", "квітень", "травень", "червень", "липень", "серпень", "вересень", "жовтень", "листопад", "грудень"];
+
 function jsonOut(o) {
   return ContentService.createTextOutput(JSON.stringify(o)).setMimeType(ContentService.MimeType.JSON);
 }
@@ -2482,6 +2753,66 @@ function updateTotals(ss, dept, periodLabel, t, stamp) {
 }
 
 // ---------- Точки входу ----------
+// ---------- Кадрова панель: хто надіслав табель за період ----------
+function sentStamps(ss, periodLabel) {
+  var res = [];
+  for (var i = 0; i < DEPARTMENTS.length; i++) res.push("");
+  var sh = ss.getSheetByName("Зведення");
+  if (!sh || sh.getLastColumn() < 3) return res;
+  var hdr = sh.getRange(1, 1, 1, sh.getLastColumn()).getValues()[0];
+  var col = 0;
+  for (var h = 2; h < hdr.length; h++) { if (String(hdr[h]) === periodLabel) { col = h + 1; break; } }
+  if (!col) return res;
+  var vals = sh.getRange(2, col, DEPARTMENTS.length, 1).getValues();
+  for (var k = 0; k < vals.length; k++) res[k] = String(vals[k][0] || "");
+  return res;
+}
+
+function handleOverview(ss, periodLabel) {
+  var st = sentStamps(ss, periodLabel);
+  var tot = {};
+  var sh = ss.getSheetByName("Сумарний");
+  if (sh && sh.getLastRow() >= 2) {
+    var v = sh.getRange(2, 1, sh.getLastRow() - 1, 12).getValues();
+    for (var i = 0; i < v.length; i++) { if (String(v[i][0]) === periodLabel) tot[String(v[i][1])] = v[i]; }
+  }
+  var rows = [];
+  for (var d = 0; d < DEPARTMENTS.length; d++) {
+    var t = tot[DEPARTMENTS[d].name];
+    rows.push({
+      id: DEPARTMENTS[d].id, name: DEPARTMENTS[d].name, sentAt: st[d],
+      count: t ? t[2] : 0, worked: t ? t[3] : 0, study: t ? t[4] : 0, leave: t ? t[5] : 0,
+      maternity: t ? t[6] : 0, unpaid: t ? t[7] : 0, sick: t ? t[8] : 0, trip: t ? t[9] : 0, other: t ? t[10] : 0
+    });
+  }
+  return { status: "ok", rows: rows };
+}
+
+// ---------- Щоденна резервна копія таблиці ----------
+function dailyBackup() {
+  var ss = SpreadsheetApp.getActiveSpreadsheet();
+  var file = DriveApp.getFileById(ss.getId());
+  var it = DriveApp.getFoldersByName(BACKUP_FOLDER);
+  var folder = it.hasNext() ? it.next() : DriveApp.createFolder(BACKUP_FOLDER);
+  var stamp = Utilities.formatDate(new Date(), Session.getScriptTimeZone(), "yyyy-MM-dd");
+  file.makeCopy(ss.getName() + " - копія " + stamp, folder);
+  var files = [];
+  var fi = folder.getFiles();
+  while (fi.hasNext()) files.push(fi.next());
+  files.sort(function (a, b) { return b.getDateCreated() - a.getDateCreated(); });
+  for (var i = BACKUP_KEEP; i < files.length; i++) files[i].setTrashed(true);
+}
+
+// ---------- Запустіть ОДИН РАЗ вручну: створює розклад (щодня о 3:00 — резервна копія таблиці) ----------
+function installTriggers() {
+  var all = ScriptApp.getProjectTriggers();
+  for (var i = 0; i < all.length; i++) {
+    var fn = all[i].getHandlerFunction();
+    if (fn === "dailyBackup") ScriptApp.deleteTrigger(all[i]);
+  }
+  ScriptApp.newTrigger("dailyBackup").timeBased().everyDays(1).atHour(3).create();
+}
+
 function doGet(e) {
   return jsonOut({ status: "ready", message: "Табель Apps Script активний (аркуш на підрозділ, збереження даних)" });
 }
@@ -2500,6 +2831,7 @@ function doPost(e) {
     var data = JSON.parse(e.postData.contents);
     var ss = SpreadsheetApp.getActiveSpreadsheet();
     var action = data.action || "sync";
+    if (action === "overview") return jsonOut(handleOverview(ss, String(data.periodLabel || "")));
     var dept = findDept(data.deptId);
     if (!dept) return jsonOut({ status: "error", message: "Невідомий підрозділ" });
 
