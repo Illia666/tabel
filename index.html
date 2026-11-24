@@ -475,6 +475,7 @@
     <button class="btn btn-glass" onclick="openEmpModal()">👥 Працівники</button>
     <button class="btn btn-glass" onclick="openVacModal()" title="Графік відпусток на рік: підставляється в табель автоматично">🏖️ Графік відпусток</button>
     <button class="btn btn-glass" onclick="openBonusModal()" title="Обґрунтування та відсоток премії по працівниках підрозділу">💰 Преміювання</button>
+    <button class="btn btn-glass hr-only" onclick="openBonusHead()" title="Узгодження премій по всіх підрозділах (потрібен окремий PIN)">💼 Узгодження премій</button>
     <button class="btn btn-glass hr-only" onclick="openHrModal()" title="Стан усіх підрозділів за обраний місяць">📋 Кадрова панель</button>
     <button class="btn btn-glass" onclick="window.print()" title="Друк або збереження у PDF (А4, альбомна)">🖨️ Друк / PDF</button>
     <button class="btn btn-success" onclick="exportToExcel()">📥 Завантажити табель (.xlsx)</button>
@@ -762,7 +763,6 @@
         <button class="btn btn-outline btn-sm" onclick="loadHr()">🔄 Оновити</button>
         <button class="btn btn-outline btn-sm" onclick="copyUnsent()">📋 Копіювати список тих, хто не надіслав</button>
         <button class="btn btn-outline btn-sm" onclick="printAllDepts()">🖨️ Друк усіх підрозділів (PDF)</button>
-        <button class="btn btn-outline btn-sm" onclick="openBonusHead()">💼 Узгодження премій (голова)</button>
       </div>
       <button class="btn btn-primary" onclick="closeHrModal()">Закрити</button>
     </div>
@@ -1379,14 +1379,13 @@ async function loadBonusHead() {
 }
 function renderBonusHead() {
   const body = document.getElementById("bonusHeadBody");
-  if (!_headRows.length) { body.innerHTML = '<p style="color:var(--muted)">Підрозділи ще не подали пропозицій за цей місяць.</p>'; return; }
   const done = _headRows.filter(r => r.status === "узгоджено").length;
   let h = `<p style="margin:0 0 8px"><b>Пропозицій: ${_headRows.length}</b>, узгоджено: ${done}.</p>`;
   h += '<table class="hr-tbl"><tr><th>Працівник</th><th>Запропоновано, %</th><th>Обґрунтування</th><th style="width:90px">Узгоджено, %</th><th>Коментар голови</th><th>Узгод.</th></tr>';
   DEPARTMENTS.forEach(d => {
     const rs = _headRows.map((r, i) => [r, i]).filter(x => x[0].deptId === d.id);
-    if (!rs.length) return;
     h += `<tr><td colspan="6" style="background:#eef2f8;font-weight:700">${psEsc(d.name)}</td></tr>`;
+    if (!rs.length) { h += '<tr><td colspan="6" style="color:var(--muted)">Заявок не подано</td></tr>'; return; }
     rs.forEach(x => {
       const r = x[0], i = x[1];
       const ap = r.approved === "" || r.approved == null ? r.percent : r.approved;
