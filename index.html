@@ -688,7 +688,8 @@
     <h3 id="bonusTitle">💰 Преміювання</h3>
     <p style="font-size:12.5px; color:var(--muted); margin-top:-6px;">Вкажіть відсоток премії та обґрунтування по кожному працівнику, якому пропонується премія. Порожній відсоток — премія не пропонується. Після узгодження головою рядок стає лише для читання.</p>
     <div id="bonusBody" style="max-height:60vh; overflow:auto; margin-bottom:12px;"></div>
-    <div style="display:flex; justify-content:flex-end; gap:8px;">
+    <div style="display:flex; justify-content:flex-end; gap:8px; flex-wrap:wrap;">
+      <button class="btn btn-outline" id="bonusWithdrawBtn" onclick="withdrawBonus()" title="Прибрати надіслані пропозиції з розгляду (узгоджені залишаються)">↩️ Відкликати надсилання</button>
       <button class="btn btn-outline" onclick="closeBonusModal()">Закрити</button>
       <button class="btn btn-success" onclick="saveBonus()">📤 Надіслати на узгодження</button>
     </div>
@@ -1280,9 +1281,11 @@ function copyUnsent() {
 function bonusPeriod() { return state.year + "-" + String(state.month + 1).padStart(2, "0"); }
 function _attr(x) { return psEsc(x).replace(/"/g, "&quot;"); }
 let _bonusSrv = {};
+let _bonusDraft = {};
 function closeBonusModal() { document.getElementById("bonusModal").classList.remove("open"); }
 async function openBonusModal() {
   if (!cloudUrl()) { openSheetsModal(); showToast("Спершу підключіть Google Таблицю"); return; }
+  _bonusDraft = {};
   document.getElementById("bonusTitle").textContent = "💰 Преміювання — " + MONTHS_UA[state.month] + " " + state.year;
   document.getElementById("bonusBody").innerHTML = '<p style="color:var(--muted)">⏳ Завантаження…</p>';
   document.getElementById("bonusModal").classList.add("open");
@@ -1301,7 +1304,8 @@ function renderBonus() {
   state.employees.forEach((e, i) => {
     const sv = _bonusSrv[e.id];
     const lock = sv && sv.status === "узгоджено";
-    const val = sv && sv.percent !== "" && sv.percent != null ? sv.percent : "";
+    const dr = _bonusDraft[e.id];
+    const val = sv && sv.percent !== "" && sv.percent != null ? sv.percent : (dr ? dr.p : "");
     let st = "—";
     if (sv) {
       const ap = sv.approved === "" || sv.approved == null ? "" : sv.approved;
@@ -1310,9 +1314,26 @@ function renderBonus() {
     }
     h += `<tr><td>${psEsc(e.num)}</td><td>${psEsc(e.name)}</td>` +
       `<td><input type="number" min="0" max="100" step="0.5" id="bp_${i}" value="${_attr(val)}" ${lock ? "disabled" : ""} style="width:76px"></td>` +
-      `<td><textarea id="br_${i}" rows="2" maxlength="2000" ${lock ? "disabled" : ""} style="width:100%;resize:vertical">${psEsc(sv ? sv.reason : "")}</textarea></td><td>${st}</td></tr>`;
+      `<td><textarea id="br_${i}" rows="2" maxlength="2000" ${lock ? "disabled" : ""} style="width:100%;resize:vertical">${psEsc(sv ? sv.reason : (dr ? dr.r : ""))}</textarea></td><td>${st}</td></tr>`;
   });
   document.getElementById("bonusBody").innerHTML = h + "</table>";
+  document.getElementById("bonusWithdrawBtn").disabled = !Object.values(_bonusSrv).some(x => x.status !== "узгоджено");
+}
+async function withdrawBonus() {
+  if (!confirm("Відкликати надіслані пропозиції на премію? Вони зникнуть з розгляду голови (узгоджені рядки залишаться). Введені дані збережуться у формі, і їх можна буде надіслати знову.")) return;
+  try {
+    const r = await serverCall({ action: "bonusWithdraw", deptId: state.currentDept, period: bonusPeriod() });
+    if (r.status !== "ok") throw new Error(r.message || "помилка сервера");
+    state.employees.forEach((e, i) => {
+      const sv = _bonusSrv[e.id];
+      if (sv && sv.status !== "узгоджено") {
+        _bonusDraft[e.id] = { p: document.getElementById("bp_" + i).value, r: document.getElementById("br_" + i).value };
+        delete _bonusSrv[e.id];
+      }
+    });
+    renderBonus();
+    showToast("Надсилання відкликано" + (r.removed ? " (пропозицій: " + r.removed + ")" : ""));
+  } catch (e) { showToast("Не вдалося відкликати: " + e.message); }
 }
 async function saveBonus() {
   const items = [];
@@ -3127,6 +3148,7 @@ function doPost(e) {
 
     if (action === "bonusLoad") return jsonOut(bonusLoad(ss, dept, String(data.period || "")));
     if (action === "bonusSave") return jsonOut(bonusSave(ss, dept, data));
+    if (action === "bonusWithdraw") return jsonOut(bonusWithdraw(ss, dept, String(data.period || "")));
     if (action === "load") return jsonOut(loadDeptData(ss, dept.id));
     if (action === "save") return jsonOut(saveDeptData(ss, dept.id, data.deptData, data.baseRev, data.force));
     if (action === "sync") return jsonOut(handleSync(data, ss, dept));
@@ -3223,6 +3245,21 @@ function bonusSave(ss, dept, data) {
   del.sort(function (a, b) { return b - a; });
   for (var d = 0; d < del.length; d++) sh.deleteRow(del[d]);
   return { status: "ok", saved: saved, locked: locked };
+}
+
+function bonusWithdraw(ss, dept, period) {
+  if (period.length !== 7) return { status: "error", message: "Некоректний період" };
+  var sh = getBonusSheet(ss);
+  var vals = bonusRows(sh);
+  var del = [], locked = 0;
+  for (var i = 0; i < vals.length; i++) {
+    if (String(vals[i][0]) === period && String(vals[i][1]) === dept.id) {
+      if (String(vals[i][9]) === "узгоджено") locked++; else del.push(i + 2);
+    }
+  }
+  del.sort(function (a, b) { return b - a; });
+  for (var d = 0; d < del.length; d++) sh.deleteRow(del[d]);
+  return { status: "ok", removed: del.length, locked: locked };
 }
 
 function bonusAll(ss, period) {
