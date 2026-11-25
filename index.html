@@ -1309,7 +1309,7 @@ function renderBonus() {
     let st = "—";
     if (sv) {
       const ap = sv.approved === "" || sv.approved == null ? "" : sv.approved;
-      st = lock ? `✅ Узгоджено: <b>${ap}%</b>` + (sv.comment ? `<br><small>${psEsc(sv.comment)}</small>` : "")
+      st = lock ? `✅ Узгоджено: <b>${ap}%</b>` + (Number(ap) !== Number(sv.percent) ? ` (запропоновано ${sv.percent}%)` : "") + (sv.comment ? `<br><small>${psEsc(sv.comment)}</small>` : "")
                 : "🕓 На розгляді" + (ap !== "" ? ` (голова: ${ap}%)` : "") + (sv.comment ? `<br><small>${psEsc(sv.comment)}</small>` : "");
     }
     h += `<tr><td>${psEsc(e.num)}</td><td>${psEsc(e.name)}</td>` +
@@ -1380,7 +1380,8 @@ async function loadBonusHead() {
 function renderBonusHead() {
   const body = document.getElementById("bonusHeadBody");
   const done = _headRows.filter(r => r.status === "узгоджено").length;
-  let h = `<p style="margin:0 0 8px"><b>Пропозицій: ${_headRows.length}</b>, узгоджено: ${done}.</p>`;
+  const chg = _headRows.filter(r => r.approved !== "" && r.approved != null && Number(r.approved) !== Number(r.percent)).length;
+  let h = `<p style="margin:0 0 8px"><b>Пропозицій: ${_headRows.length}</b>, узгоджено: ${done}, змінено головою: ${chg}.</p>`;
   h += '<table class="hr-tbl"><tr><th>Працівник</th><th>Запропоновано, %</th><th>Обґрунтування</th><th style="width:90px">Узгоджено, %</th><th>Коментар голови</th><th>Узгод.</th></tr>';
   DEPARTMENTS.forEach(d => {
     const rs = _headRows.map((r, i) => [r, i]).filter(x => x[0].deptId === d.id);
@@ -1389,13 +1390,18 @@ function renderBonusHead() {
     rs.forEach(x => {
       const r = x[0], i = x[1];
       const ap = r.approved === "" || r.approved == null ? r.percent : r.approved;
-      h += `<tr><td>${psEsc(r.name)}</td><td>${r.percent}</td><td style="white-space:pre-wrap">${psEsc(r.reason)}</td>` +
-        `<td><input type="number" min="0" max="100" step="0.5" id="ha_${i}" value="${_attr(ap)}" style="width:76px"></td>` +
+      const diff = Number(ap) !== Number(r.percent);
+      h += `<tr id="hr_${i}" style="${diff ? "background:#fff7d6" : ""}"><td>${psEsc(r.name)}</td><td>${r.percent}</td><td style="white-space:pre-wrap">${psEsc(r.reason)}</td>` +
+        `<td><input type="number" min="0" max="100" step="0.5" id="ha_${i}" value="${_attr(ap)}" oninput="hlRow(${i})" style="width:76px"></td>` +
         `<td><input type="text" id="hc_${i}" value="${_attr(r.comment)}" maxlength="500" style="width:100%"></td>` +
         `<td style="text-align:center"><input type="checkbox" id="hk_${i}" ${r.status === "узгоджено" ? "checked" : ""}></td></tr>`;
     });
   });
   body.innerHTML = h + "</table>";
+}
+function hlRow(i) {
+  const v = document.getElementById("ha_" + i).value.trim();
+  document.getElementById("hr_" + i).style.background = v !== "" && Number(v) !== Number(_headRows[i].percent) ? "#fff7d6" : "";
 }
 function markAllApproved() { _headRows.forEach((r, i) => { const c = document.getElementById("hk_" + i); if (c) c.checked = true; }); }
 async function saveBonusHead() {
