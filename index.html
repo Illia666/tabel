@@ -478,6 +478,7 @@
     <button class="btn btn-glass hr-only" onclick="openBonusHead()" title="Узгодження премій по всіх підрозділах (потрібен окремий PIN)">💼 Узгодження премій</button>
     <button class="btn btn-glass hr-only" onclick="openHrModal()" title="Стан усіх підрозділів за обраний місяць">📋 Кадрова панель</button>
     <button class="btn btn-glass" onclick="window.print()" title="Друк або збереження у PDF (А4, альбомна)">🖨️ Друк / PDF</button>
+    <button class="btn btn-glass" onclick="downloadPdf()" title="Зберегти табель як PDF з готовою назвою файлу — для підписання КЕП у СЕД АСКОД">📄 Завантажити PDF</button>
     <button class="btn btn-success" onclick="exportToExcel()">📥 Завантажити табель (.xlsx)</button>
   </div>
 </header>
@@ -536,6 +537,10 @@
       <div class="field">
         <label>Дата заповнення (у бланк)</label>
         <input type="date" id="fillDateInput" value="2026-11-30" onchange="saveState()" />
+      </div>
+      <div class="field">
+        <label>Підписання</label>
+        <label style="display:flex;align-items:center;gap:6px;font-weight:400;"><input type="checkbox" id="kepMode" onchange="applyKepPage()" /> Підпис КЕП (АСКОД): без блоку підписів, місце під штамп</label>
       </div>
       <div class="field">
         <label>Керівник підрозділу (підпис)</label>
@@ -2416,6 +2421,35 @@ function renderPrintMeta() {
   host.innerHTML = h;
 }
 window.addEventListener("beforeprint", renderPrintMeta);
+
+// Штамп КЕП СЕД АСКОД ставиться знизу сторінки: залишаємо там вільне місце (мм), щоб він не накладався на підписи
+const KEP_BOTTOM_MM = 35;
+function applyKepPage() {
+  let st = document.getElementById("kepPageStyle");
+  if (!st) { st = document.createElement("style"); st.id = "kepPageStyle"; document.head.appendChild(st); }
+  const on = document.getElementById("kepMode") && document.getElementById("kepMode").checked;
+  st.textContent = on ? "@page { size: A4 landscape; margin: 8mm 8mm " + KEP_BOTTOM_MM + "mm 8mm; } @media print { #printSheet .ps-foot { display: none !important; } }" : "";
+}
+window.addEventListener("beforeprint", applyKepPage);
+
+
+// Назва файлу для PDF: Табель П-5_<підрозділ>_<рік>-<місяць>[_аванс]
+function pdfFileName() {
+  const d = getDept(state.currentDept);
+  const mm = String(state.month + 1).padStart(2, "0");
+  const half = state.halfMode === "first_half" ? "_аванс" : "";
+  return ("Табель П-5_" + d.short + "_" + state.year + "-" + mm + half).replace(/[\\/:*?"<>|]+/g, " ").trim();
+}
+// Браузер бере назву з заголовка сторінки, тому підставляємо її на час друку
+function downloadPdf() {
+  const oldTitle = document.title;
+  document.title = pdfFileName();
+  const restore = () => { document.title = oldTitle; window.removeEventListener("afterprint", restore); };
+  window.addEventListener("afterprint", restore);
+  showToast("У вікні друку оберіть «Зберегти як PDF», аркуш А4 альбомний");
+  window.print();
+}
+
 
 function copyDeptLink() {
   const url = location.href.split("#")[0].split("?")[0] + "?dept=" + state.currentDept;
